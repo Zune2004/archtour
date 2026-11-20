@@ -97,7 +97,8 @@ jobs:
 with the same result). Do not skip the job with an `if:`: GitHub counts a skipped required check as passed.
 
 Optional inputs: `paths`, `ignore`, `include-tests`, `migration-dirs` (extra migration folders, comma-separated, e.g.
-`db/deploy`) and `max-file-size` (MB, default 5).
+`db/deploy`), `max-file-size` (MB, default 5) and `render-helm` (`auto` by default; `on` fails with exit 3 when helm is
+missing, `off` keeps the raw-template behaviour).
 
 - **`hard` findings** (e.g. privileged container, removing API route security, deleting databases in Terraform): exit code `1`, blocks merge, cannot be overridden in pull requests.
 - **`soft` findings** (e.g. dropped database columns, removed API routes): exit code `2`, blocks merge unless overridden by an authorized owner.
@@ -190,7 +191,7 @@ Archtour catches risky changes made **by mistake**: a dropped column, an edited 
 
 Known gaps (the check does not see these changes):
 
-- **Helm values:** a change made only in `values.yaml` is not rendered. Run `helm template` in CI and check its output.
+- **Helm charts** are rendered with `helm template` when helm is available (it is on GitHub's Linux runners); charts whose dependencies are not vendored in `charts/` cannot be rendered and still block with `changed-file-not-checked`.
 - **Compose `extends:` / `include:`:** files pulled in from elsewhere are not merged into the service that uses them.
 - **OpenAPI `$ref` to other files:** routes defined in a referenced file are not followed.
 - **Liquibase XML/YAML changelogs and kustomize inline patches:** not read.

@@ -34,6 +34,7 @@ import {
 import { diffRepo } from "./diff-repo.mjs";
 import { auditHistory } from "./history.mjs";
 import { setSettings } from "./settings.mjs";
+import { helmAvailable } from "./helm-render.mjs";
 
 // ---------------------------------------------------------------- helpers
 
@@ -150,6 +151,10 @@ function parseArgs(argv) {
     else if (a.startsWith("--max-file-size=")) out.maxFileSize = Number(a.slice("--max-file-size=".length));
     else if (a === "--max-depth") out.maxDepth = Number(argv[++i]);
     else if (a.startsWith("--max-depth=")) out.maxDepth = Number(a.slice("--max-depth=".length));
+    else if (a === "--render-helm") out.renderHelm = argv[++i];
+    else if (a.startsWith("--render-helm=")) out.renderHelm = a.slice("--render-helm=".length);
+    else if (a === "--helm-bin") out.helmBin = argv[++i];
+    else if (a.startsWith("--helm-bin=")) out.helmBin = a.slice("--helm-bin=".length);
     else if (a === "--include-tests") out.includeTests = true;
     else if (a === "--ignore") {
       const val = argv[++i];
@@ -561,6 +566,11 @@ async function handleBaselineCommand(targetArg, opts = {}) {
 }
 
 async function handleCheckCommand(baseDir, headDir, opts = {}) {
+  const renderHelmMode = opts.renderHelm === undefined ? "auto" : String(opts.renderHelm);
+  if (!["auto", "on", "off"].includes(renderHelmMode)) {
+    die(`invalid --render-helm: "${renderHelmMode}". Must be "auto", "on" or "off"`, 3);
+  }
+  opts = { ...opts, renderHelm: renderHelmMode };
   const isStateMode = Boolean(opts.state);
   const isChangedMode = Boolean(opts.changedFrom);
   const stateDir = (typeof opts.state === "string" ? opts.state : null) || baseDir;
@@ -677,6 +687,12 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       });
     }
   } else if (isChangedMode && inGit) {
+    if (renderHelmMode === "auto") {
+      opts = { ...opts, renderHelm: (await helmAvailable(opts.helmBin)) ? "on" : "off" };
+    } else if (renderHelmMode === "on" && !(await helmAvailable(opts.helmBin))) {
+      policyCleanup();
+      die("--render-helm on: helm not found", 3);
+    }
     let changedRes;
     try {
       changedRes = await getChangedFacts(targetDir, opts.changedFrom, opts, cache);
@@ -1004,6 +1020,8 @@ function printCheckHelp() {
   console.log("  --max-files <n>             Maximum candidate files to examine (default: 20000)");
   console.log("  --migration-dir <path>      Extra folder whose .sql files are migrations (repeatable)");
   console.log("  --max-file-size <MB>        Skip files larger than this (default: 5; Terraform plan JSON: 50)");
+  console.log("  --render-helm <mode>        Render Helm charts: auto|on|off (default: auto)");
+  console.log("  --helm-bin <path>           Helm binary to use (default: helm)");
   console.log("  --json                      Output machine-readable JSON");
   console.log("  --md, --markdown <file>     Write markdown report to file");
   console.log("  --log-all                   Print every finding to stderr (job log), even if the report is not capped");

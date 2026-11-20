@@ -835,8 +835,8 @@ export function extractFacts(files = [], opts = {}) {
         parseErrors.push(errEntry);
       }
     } else if (isOpenApiYaml || isOpenApiJson) {
-      if (isOpenApiYaml && isHelmTemplate(filePath, content, f.fullPath, opts.rootDir || null, opts.addedCharts || null)) {
-        const reason = "Helm template: render with `helm template` and scan the output";
+      if (isOpenApiYaml && !f.rendered && isHelmTemplate(filePath, content, f.fullPath, opts.rootDir || null, opts.addedCharts || null)) {
+        const reason = f.helmSkipReason || "Helm template: render with `helm template` and scan the output";
         skipped.push({ path: filePath, reason, helmChart: hasChartAncestor(f.fullPath, opts.rootDir || null, opts.addedCharts || null) });
         errors.push({ file: filePath, message: reason, reason, skipped: true });
         continue;
@@ -865,7 +865,7 @@ export function extractFacts(files = [], opts = {}) {
       }
     } else if (isK8sManifest(filePath, content, obj)) {
       try {
-        const ok = parseK8sFacts(filePath, content, getStableId, entities, relations, errors, skipped, parseErrors, f.fullPath, opts.rootDir || null, opts.addedCharts || null);
+        const ok = parseK8sFacts(filePath, content, getStableId, entities, relations, errors, skipped, parseErrors, f.fullPath, opts.rootDir || null, opts.addedCharts || null, f.rendered === true, f.helmSkipReason || null);
         if (ok && ok.skipped) {
           continue;
         }

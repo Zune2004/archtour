@@ -11,6 +11,7 @@ import YAML from "yaml";
 import { computeBlobSha, FactsCache } from "./facts-cache.mjs";
 import { diffFacts } from "./facts-diff.mjs";
 import { loadRules, evaluateRules } from "./rules.mjs";
+import { renderChart } from "./helm-render.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -162,7 +163,8 @@ async function listFilesAtRef(repoDir, ref, dir) {
   try {
     const lsArgs = ["ls-tree", "-r", "--name-only", "-z", ref];
     if (dir && dir !== ".") lsArgs.push("--", dir);
-    const { stdout } = await execFileAsync("git", lsArgs, { cwd: repoDir, encoding: "utf8" });
+    // A whole-repo listing of a big monorepo is many MB; the 1 MB default made it fail and look like "no files".
+    const { stdout } = await execFileAsync("git", lsArgs, { cwd: repoDir, encoding: "utf8", maxBuffer: 200 * 1024 * 1024 });
     return stdout.split("\0").filter(Boolean).map(f => f.replace(/\\/g, "/"));
   } catch {
     return [];
@@ -459,12 +461,14 @@ export async function extractFactsWithCache(files, cache = null, opts = {}) {
   // 1. Standalone candidate files
   for (const f of standaloneFiles) {
     let facts = null;
-    if (cache && f.sha) {
+    // Rendered Helm output and templates with a render-failure reason depend on more than the blob: never cached.
+    const cacheable = cache && f.sha && !f.rendered && !f.helmSkipReason;
+    if (cacheable) {
       facts = cache.get(f.sha, f.path);
     }
     if (!facts) {
       facts = extractFacts([f], opts);
-      if (cache && f.sha) {
+      if (cacheable) {
         cache.set(f.sha, facts);
       }
     }
@@ -681,6 +685,175 @@ export async function batchCatFileSafe(repoDir, queries) {
   });
 }
 
+// True when `dir` (repo-relative, "" = repo root) has a Chart.yaml/Chart.yml in the given file listing.
+function chartFileInDir(listing, dir) {
+  const prefix = dir ? `${dir}/` : "";
+  return listing.has(`${prefix}Chart.yaml`) || listing.has(`${prefix}Chart.yml`);
+}
+
+// The nearest chart folder above each changed path, at the merge base or at the head side.
+async function findTouchedCharts(rootDir, mergeBase, changedPaths, opts) {
+  const baseListing = new Set(await listFilesAtRef(rootDir, mergeBase));
+  const headListing = opts.headRef ? new Set(await listFilesAtRef(rootDir, opts.headRef)) : null;
+  const charts = new Map();
+
+  for (const changed of changedPaths) {
+    const parts = String(changed).replace(/\\/g, "/").split("/");
+    parts.pop();
+    let dir = parts.join("/");
+    while (true) {
+      const atBase = chartFileInDir(baseListing, dir);
+      let atHead = false;
+      if (headListing) {
+        atHead = chartFileInDir(headListing, dir);
+      } else {
+        const abs = dir ? path.join(rootDir, ...dir.split("/")) : rootDir;
+        atHead = fs.existsSync(path.join(abs, "Chart.yaml")) || fs.existsSync(path.join(abs, "Chart.yml"));
+      }
+      if (atBase || atHead) {
+        charts.set(dir, { dir, atBase, atHead });
+        break;
+      }
+      if (!dir) break;
+      dir = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
+    }
+  }
+
+  return Array.from(charts.values()).sort((a, b) => a.dir.localeCompare(b.dir));
+}
+
+// Writes every file of the chart folder at `ref` into destDir. False when the chart has no files at that ref.
+async function materializeChartAtRef(rootDir, ref, chartDir, destDir) {
+  const files = await listFilesAtRef(rootDir, ref, chartDir || null);
+  if (files.length === 0) return false;
+  const prefix = chartDir ? `${chartDir}/` : "";
+  // Raw bytes, not text: vendored subcharts (charts/*.tgz) are binary and a text round-trip corrupts them.
+  for (const p of files) {
+    let buf;
+    try {
+      ({ stdout: buf } = await execFileAsync("git", ["cat-file", "blob", `${ref}:${p}`], { cwd: rootDir, encoding: "buffer", maxBuffer: 50 * 1024 * 1024 }));
+    } catch {
+      continue;
+    }
+    const rel = prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p;
+    const dest = path.join(destDir, ...rel.split("/"));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, buf);
+  }
+  return true;
+}
+
+// Copies the chart folder from disk into destDir. False when the folder does not exist or holds no files.
+function materializeChartFromDisk(rootDir, chartDir, destDir) {
+  const src = chartDir ? path.join(rootDir, ...chartDir.split("/")) : rootDir;
+  if (!fs.existsSync(src)) return false;
+  let count = 0;
+  const walk = (dir, rel) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (shouldSkipDir(entry.name)) continue;
+        walk(path.join(dir, entry.name), childRel);
+      } else if (entry.isFile()) {
+        const dest = path.join(destDir, ...childRel.split("/"));
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(path.join(dir, entry.name), dest);
+        count++;
+      }
+    }
+  };
+  walk(src, "");
+  return count > 0;
+}
+
+function chartTemplatesPrefix(chartDirDisplay) {
+  return chartDirDisplay ? `${chartDirDisplay}/templates/` : "templates/";
+}
+
+// The raw templates must not be parsed or reported once the chart rendered: drop them from both sides.
+function removeChartTemplates(files, chartDirDisplay) {
+  const prefix = chartTemplatesPrefix(chartDirDisplay);
+  for (let i = files.length - 1; i >= 0; i--) {
+    if (String(files[i].path || "").startsWith(prefix)) files.splice(i, 1);
+  }
+}
+
+// Several docs from one template file are joined into one file content with `---` between them.
+function addRenderedDocs(files, chartDirDisplay, docs, rootDir) {
+  const bySource = new Map();
+  for (const doc of docs) {
+    const rel = chartDirDisplay ? `${chartDirDisplay}/${doc.source}` : doc.source;
+    if (!rel) continue;
+    if (!bySource.has(rel)) bySource.set(rel, []);
+    bySource.get(rel).push(doc.content);
+  }
+  for (const [rel, contents] of bySource) {
+    const content = contents.join("\n---\n");
+    files.push({
+      path: rel,
+      fullPath: path.resolve(rootDir, ...rel.split("/")),
+      content,
+      sha: computeBlobSha(content),
+      rendered: true
+    });
+  }
+}
+
+function markChartTemplatesSkipped(files, chartDirDisplay, reason) {
+  const prefix = chartTemplatesPrefix(chartDirDisplay);
+  for (const f of files) {
+    if (String(f.path || "").startsWith(prefix)) f.helmSkipReason = reason;
+  }
+}
+
+async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, headFiles, opts, display }) {
+  const charts = await findTouchedCharts(rootDir, mergeBase, changedPaths, opts);
+  if (charts.length === 0) return;
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-helm-"));
+  try {
+    let index = 0;
+    for (const chart of charts) {
+      const chartDir = chart.dir;
+      const chartDisplay = display(chartDir);
+      const baseTmp = path.join(tmpRoot, `${index}-base`);
+      const headTmp = path.join(tmpRoot, `${index}-head`);
+      index++;
+      fs.mkdirSync(baseTmp, { recursive: true });
+      fs.mkdirSync(headTmp, { recursive: true });
+
+      const baseExists = chart.atBase ? await materializeChartAtRef(rootDir, mergeBase, chartDir, baseTmp) : false;
+      const headExists = !chart.atHead
+        ? false
+        : (opts.headRef
+          ? await materializeChartAtRef(rootDir, opts.headRef, chartDir, headTmp)
+          : materializeChartFromDisk(rootDir, chartDir, headTmp));
+
+      const baseRender = baseExists ? await renderChart(baseTmp, { helmBin: opts.helmBin }) : null;
+      const headRender = headExists ? await renderChart(headTmp, { helmBin: opts.helmBin }) : null;
+
+      const baseOk = !baseExists || Boolean(baseRender && baseRender.ok);
+      const headOk = !headExists || Boolean(headRender && headRender.ok);
+
+      if (baseOk && headOk) {
+        removeChartTemplates(baseFiles, chartDisplay);
+        removeChartTemplates(headFiles, chartDisplay);
+        if (baseRender && baseRender.ok) addRenderedDocs(baseFiles, chartDisplay, baseRender.docs, rootDir);
+        if (headRender && headRender.ok) addRenderedDocs(headFiles, chartDisplay, headRender.docs, rootDir);
+      } else {
+        const failed = [baseRender, headRender].find(r => r && !r.ok);
+        const reason = `Helm template: helm template failed (${failed ? failed.error : "unknown error"}); render it in CI and scan the output`;
+        markChartTemplatesSkipped(baseFiles, chartDisplay, reason);
+        markChartTemplatesSkipped(headFiles, chartDisplay, reason);
+      }
+    }
+  } finally {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 /**
  * Loads changed facts for both base (via git show or batched git cat-file) and head (from disk).
  */
@@ -782,6 +955,11 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
       const sha = computeBlobSha(content);
       baseFiles.push({ path: meta.shown, fullPath: meta.fullPath, content, sha });
     }
+  }
+
+  // Render every touched Helm chart and replace its raw templates with the rendered manifests.
+  if (opts.renderHelm === "on") {
+    await renderHelmCharts({ rootDir, mergeBase, changedPaths: allChanged, baseFiles, headFiles, opts, display });
   }
 
   // Build addedCharts: Chart.yaml/Chart.yml files added by the change. Look at every changed file, not only the scanned

@@ -4389,7 +4389,7 @@ test("Pod template edited inside a chart that exists in base: soft by default, a
     fs.writeFileSync(path.join(tmpRepo, "templates", "pod.yaml"), podContent + "  # another change\n");
     gitCommitAll(tmpRepo, "modify pod");
 
-    const r = spawnSync(process.execPath, [CLI, "check", "--changed-from", baseCommit, tmpRepo, "--json"], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [CLI, "check", "--changed-from", baseCommit, tmpRepo, "--json", "--render-helm", "off"], { encoding: "utf8" });
     assert.equal(r.status, 2, `Expected exit 2 (soft changed-file-not-checked) for an edited chart template, got ${r.status}`);
     const parsed = JSON.parse(r.stdout);
     assert.ok(parsed.findings.some(f => f.ruleId === "changed-file-not-checked" && f.level === "soft"));
@@ -4404,7 +4404,7 @@ test("Pod template edited inside a chart that exists in base: soft by default, a
     const policyBase = spawnSync("git", ["rev-parse", "HEAD"], { cwd: tmpRepo, encoding: "utf8" }).stdout.trim();
     fs.writeFileSync(path.join(tmpRepo, "templates", "pod.yaml"), podContent + "  # another change\n");
     gitCommitAll(tmpRepo, "modify pod again");
-    const r2 = spawnSync(process.execPath, [CLI, "check", "--changed-from", policyBase, tmpRepo, "--json"], { encoding: "utf8" });
+    const r2 = spawnSync(process.execPath, [CLI, "check", "--changed-from", policyBase, tmpRepo, "--json", "--render-helm", "off"], { encoding: "utf8" });
     assert.equal(r2.status, 0, `Expected exit 0 when the base policy lowers changed-file-not-checked, got ${r2.status}: ${r2.stderr}`);
     const parsed2 = JSON.parse(r2.stdout);
     assert.ok(parsed2.findings.some(f => f.ruleId === "changed-file-not-checked" && f.level === "advisory"));

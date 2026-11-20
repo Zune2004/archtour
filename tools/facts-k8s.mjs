@@ -37,9 +37,9 @@ export function isK8sManifest(filePath = "", content = "", obj = null) {
   return /^\s*apiVersion\s*:/m.test(content) && /^\s*kind\s*:/m.test(content);
 }
 
-export function parseK8sFacts(filePath, content, getStableId, entities, relations, errors, skipped, parseErrors, fullPath = null, rootDir = null, addedCharts = null) {
-  if (isHelmTemplate(filePath, content, fullPath, rootDir, addedCharts)) {
-    const reason = "Helm template: render with `helm template` and scan the output";
+export function parseK8sFacts(filePath, content, getStableId, entities, relations, errors, skipped, parseErrors, fullPath = null, rootDir = null, addedCharts = null, rendered = false, helmSkipReason = null) {
+  if (!rendered && isHelmTemplate(filePath, content, fullPath, rootDir, addedCharts)) {
+    const reason = helmSkipReason || "Helm template: render with `helm template` and scan the output";
     errors.push({
       file: filePath,
       message: reason,

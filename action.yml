@@ -39,6 +39,10 @@ inputs:
     description: 'Skip files larger than this many MB (default 5)'
     required: false
     default: ''
+  render-helm:
+    description: 'Render Helm charts with helm template: auto, on or off (default auto)'
+    required: false
+    default: 'auto'
 
 runs:
   using: 'composite'
@@ -201,6 +205,7 @@ runs:
         INPUT_INCLUDE_TESTS: ${{ inputs.include-tests }}
         INPUT_MIGRATION_DIRS: ${{ inputs.migration-dirs }}
         INPUT_MAX_FILE_SIZE: ${{ inputs.max-file-size }}
+        INPUT_RENDER_HELM: ${{ inputs.render-helm }}
         EVENT_NAME: ${{ github.event_name }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         ARCHTOUR_HAS_OVERRIDE: ${{ env.ARCHTOUR_HAS_OVERRIDE }}
@@ -286,6 +291,10 @@ runs:
 
         if [ -n "$INPUT_MAX_FILE_SIZE" ]; then
           CHECK_ARGS+=("--max-file-size=$INPUT_MAX_FILE_SIZE")
+        fi
+
+        if [ -n "$INPUT_RENDER_HELM" ]; then
+          CHECK_ARGS+=("--render-helm=$INPUT_RENDER_HELM")
         fi
 
         set +e

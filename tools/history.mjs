@@ -13,6 +13,7 @@ import { loadRules, evaluateRules, LEVEL_SEVERITY } from "./rules.mjs";
 import { isSqlMigrationCandidate } from "./facts-sql.mjs";
 import { mdText } from "./diff.mjs";
 import { evaluateChangedCommit, resolveBasePolicy } from "./changed.mjs";
+import { helmAvailable } from "./helm-render.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -289,6 +290,10 @@ export function formatHistoryMarkdownReport(result, opts = {}) {
 
 export async function auditHistory(targetDir = ".", opts = {}) {
   const repoDir = path.resolve(targetDir);
+  // Same Helm rendering decision as `check` (auto = render when helm is installed), so the audit matches the gate.
+  if (opts.renderHelm !== "on" && opts.renderHelm !== "off") {
+    opts = { ...opts, renderHelm: (await helmAvailable(opts.helmBin)) ? "on" : "off" };
+  }
   const maxCommits = opts.maxCommits != null ? Number(opts.maxCommits) : 500;
   const branch = opts.branch || "HEAD";
   const repoUrl = opts.repoUrl ? String(opts.repoUrl).replace(/\/+$/, "") : null;

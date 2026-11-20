@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Helm charts are rendered** with `helm template` when helm is installed (it is on GitHub's Linux runners), so a chart
+  whose templates or `values.yaml` change is checked like any other manifest (a `privileged: true` set only in
+  `values.yaml` is now caught). `--render-helm auto|on|off` (default `auto`), `--helm-bin`, Action input `render-helm`.
+  A chart that cannot be rendered (required values, dependencies not vendored in `charts/`) still blocks with
+  `changed-file-not-checked`, and the reason now quotes helm's error.
+
 ### Fixed
 - **`audit-history` now gives the same result as `check`** for each past commit: it replays the migrations folder,
   multi-file Prisma schemas and GraphQL folders, and uses the policy of the commit's parent, like the gate. Before, it
