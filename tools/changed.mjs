@@ -9,6 +9,8 @@ import { isSqlMigrationCandidate } from "./facts-sql.mjs";
 import { isGraphQLFile } from "./facts-graphql.mjs";
 import YAML from "yaml";
 import { computeBlobSha, FactsCache } from "./facts-cache.mjs";
+import { diffFacts } from "./facts-diff.mjs";
+import { loadRules, evaluateRules } from "./rules.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -98,13 +100,21 @@ function parseNameStatusZ(stdout, renames) {
  */
 export async function getChangedFiles(repoDir, mergeBase, opts = {}) {
   const renames = opts.renames instanceof Map ? opts.renames : new Map();
+  // opts.headRef reads the head side from a commit instead of the working tree.
+  const headRev = opts.headRef || "HEAD";
 
-  const diffOutput = await execFileAsync("git", ["diff", "-M", "--name-status", "-z", mergeBase, "HEAD"], {
+  const diffOutput = await execFileAsync("git", ["diff", "-M", "--name-status", "-z", mergeBase, headRev], {
     cwd: repoDir,
     encoding: "utf8",
     maxBuffer: 50 * 1024 * 1024
   });
   const files = parseNameStatusZ(diffOutput.stdout, renames);
+
+  if (opts.headRef) {
+    const unique = Array.from(new Set(files.map(p => p.replace(/\\/g, "/"))));
+    unique.renames = renames;
+    return unique;
+  }
 
   if (opts.includeUntracked) {
     try {
@@ -147,17 +157,45 @@ function prismaMigrationsRootFor(relPath) {
   return parts.slice(0, -2).join("/");
 }
 
-// A real Prisma migrations folder holds migration_lock.toml or at least one <timestamp>_<name>/migration.sql.
-async function hasPrismaMigrationsEvidence(repoDir, mergeBase, root) {
-  const headRoot = path.join(repoDir, ...root.split("/"));
+// Repo-relative file paths under `dir` at `ref` (recursive). Empty list when the directory is missing at that ref.
+async function listFilesAtRef(repoDir, ref, dir) {
   try {
-    if (fs.existsSync(path.join(headRoot, "migration_lock.toml"))) return true;
-    if (fs.existsSync(headRoot)) {
-      for (const entry of fs.readdirSync(headRoot, { withFileTypes: true })) {
-        if (entry.isDirectory() && fs.existsSync(path.join(headRoot, entry.name, "migration.sql"))) return true;
+    const lsArgs = ["ls-tree", "-r", "--name-only", "-z", ref];
+    if (dir && dir !== ".") lsArgs.push("--", dir);
+    const { stdout } = await execFileAsync("git", lsArgs, { cwd: repoDir, encoding: "utf8" });
+    return stdout.split("\0").filter(Boolean).map(f => f.replace(/\\/g, "/"));
+  } catch {
+    return [];
+  }
+}
+
+// True when `relPath` exists (file or directory) at `ref`.
+async function pathExistsAtRef(repoDir, ref, relPath) {
+  try {
+    await execFileAsync("git", ["cat-file", "-e", `${ref}:${relPath}`], { cwd: repoDir, encoding: "utf8" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A real Prisma migrations folder holds migration_lock.toml or at least one <timestamp>_<name>/migration.sql.
+async function hasPrismaMigrationsEvidence(repoDir, mergeBase, root, headRef = null) {
+  if (headRef) {
+    if (await pathExistsAtRef(repoDir, headRef, `${root}/migration_lock.toml`)) return true;
+    const headFiles = await listFilesAtRef(repoDir, headRef, root);
+    if (headFiles.some(f => f.endsWith("/migration.sql"))) return true;
+  } else {
+    const headRoot = path.join(repoDir, ...root.split("/"));
+    try {
+      if (fs.existsSync(path.join(headRoot, "migration_lock.toml"))) return true;
+      if (fs.existsSync(headRoot)) {
+        for (const entry of fs.readdirSync(headRoot, { withFileTypes: true })) {
+          if (entry.isDirectory() && fs.existsSync(path.join(headRoot, entry.name, "migration.sql"))) return true;
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
   try {
     const { stdout } = await execFileAsync("git", ["ls-tree", "-r", "--name-only", "-z", mergeBase, "--", root], {
       cwd: repoDir,
@@ -228,9 +266,17 @@ export async function expandDirectoryCandidates(repoDir, mergeBase, candidatePat
       }
     } catch {}
 
-    // Head: disk
+    // Head: git at headRef, or disk for the working tree
     const diskDir = dir === "." ? repoDir : path.join(repoDir, dir);
-    if (fs.existsSync(diskDir)) {
+    if (opts.headRef) {
+      for (const relP of await listFilesAtRef(repoDir, opts.headRef, dir)) {
+        const relDir = relP.includes("/") ? relP.slice(0, relP.lastIndexOf("/")) : ".";
+        if (relDir !== dir) continue;
+        if (isCandidateSource(relP, opts) && isSqlMigrationCandidate(relP, relP, relP.split("/").pop())) {
+          resultPaths.add(relP);
+        }
+      }
+    } else if (fs.existsSync(diskDir)) {
       try {
         const entries = fs.readdirSync(diskDir, { withFileTypes: true });
         for (const entry of entries) {
@@ -249,7 +295,7 @@ export async function expandDirectoryCandidates(repoDir, mergeBase, candidatePat
   // 1b. Prisma per-folder migrations: every <folder>/migration.sql under the migrations root, in folder-name order
   // (the final sort is numeric, so timestamp folder names replay in order).
   for (const root of prismaMigrationRoots) {
-    if (!(await hasPrismaMigrationsEvidence(repoDir, mergeBase, root))) continue;
+    if (!(await hasPrismaMigrationsEvidence(repoDir, mergeBase, root, opts.headRef || null))) continue;
 
     // Base: git ls-tree over the migrations root
     try {
@@ -266,9 +312,16 @@ export async function expandDirectoryCandidates(repoDir, mergeBase, candidatePat
       }
     } catch {}
 
-    // Head: disk
+    // Head: git at headRef, or disk for the working tree
     const diskRoot = path.join(repoDir, ...root.split("/"));
-    if (fs.existsSync(diskRoot)) {
+    if (opts.headRef) {
+      const depth = root.split("/").length + 2;
+      for (const relP of await listFilesAtRef(repoDir, opts.headRef, root)) {
+        const parts = relP.split("/");
+        if (parts.length !== depth || parts[parts.length - 1] !== "migration.sql") continue;
+        if (isCandidateSource(relP, opts)) resultPaths.add(relP);
+      }
+    } else if (fs.existsSync(diskRoot)) {
       try {
         for (const entry of fs.readdirSync(diskRoot, { withFileTypes: true })) {
           if (!entry.isDirectory()) continue;
@@ -295,9 +348,17 @@ export async function expandDirectoryCandidates(repoDir, mergeBase, candidatePat
       }
     } catch {}
 
-    // Head: disk
+    // Head: git at headRef, or disk for the working tree
     const diskDir = dir === "." ? repoDir : path.join(repoDir, dir);
-    if (fs.existsSync(diskDir)) {
+    if (opts.headRef) {
+      for (const relP of await listFilesAtRef(repoDir, opts.headRef, dir)) {
+        const relDir = relP.includes("/") ? relP.slice(0, relP.lastIndexOf("/")) : ".";
+        if (relDir !== dir) continue;
+        if (isCandidateSource(relP, opts) && isGraphQLFile(relP)) {
+          resultPaths.add(relP);
+        }
+      }
+    } else if (fs.existsSync(diskDir)) {
       try {
         const entries = fs.readdirSync(diskDir, { withFileTypes: true });
         for (const entry of entries) {
@@ -328,9 +389,17 @@ export async function expandDirectoryCandidates(repoDir, mergeBase, candidatePat
       }
     } catch {}
 
-    // Head: disk
+    // Head: git at headRef, or disk for the working tree
     const diskDir = dir === "." ? repoDir : path.join(repoDir, dir);
-    if (fs.existsSync(diskDir)) {
+    if (opts.headRef) {
+      for (const relP of await listFilesAtRef(repoDir, opts.headRef, dir)) {
+        const relDir = relP.includes("/") ? relP.slice(0, relP.lastIndexOf("/")) : ".";
+        if (relDir !== dir) continue;
+        if (isCandidateSource(relP, opts) && /\.prisma$/i.test(relP.split("/").pop())) {
+          resultPaths.add(relP);
+        }
+      }
+    } else if (fs.existsSync(diskDir)) {
       try {
         const entries = fs.readdirSync(diskDir, { withFileTypes: true });
         for (const entry of entries) {
@@ -617,7 +686,11 @@ export async function batchCatFileSafe(repoDir, queries) {
  */
 export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache = null) {
   const rootDir = await getGitRoot(repoDir);
-  const mergeBase = await getMergeBase(rootDir, changedFromRef);
+  // A recorded commit has no working-tree HEAD to merge with: the base ref the caller passed (the commit's parent) is
+  // the base side. getMergeBase stays untouched for the working-tree path.
+  const mergeBase = opts.headRef
+    ? (await execFileAsync("git", ["rev-parse", "--verify", `${changedFromRef}^{commit}`], { cwd: rootDir, encoding: "utf8" })).stdout.trim()
+    : await getMergeBase(rootDir, changedFromRef);
   // The scanned folder inside the repo ("" = repo root). Only files under it count, and fact paths are relative to it,
   // exactly like a full scan of that folder (dev compose ids and exceptions use these paths).
   const scope = repoScope(rootDir, repoDir);
@@ -649,18 +722,35 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
   const baseFiles = [];
   const headFiles = [];
 
-  // Head version from disk
-  for (const relPath of candidatePaths) {
-    const fullPath = path.resolve(rootDir, relPath);
-    const shown = display(relPath);
-
-    if (fs.existsSync(fullPath)) {
-      try {
-        const content = fs.readFileSync(fullPath, "utf8").replace(/^\uFEFF/, "");
+  if (opts.headRef) {
+    // Head version from git at headRef (missing at headRef = deleted in head)
+    const headQueries = [];
+    for (const relPath of candidatePaths) {
+      headQueries.push(`${opts.headRef}:${relPath}`);
+    }
+    const headResults = await batchCatFile(rootDir, headQueries);
+    for (const relPath of candidatePaths) {
+      const res = headResults.get(`${opts.headRef}:${relPath}`);
+      if (res && res.content != null) {
+        const content = res.content;
         const sha = computeBlobSha(content);
-        headFiles.push({ path: shown, fullPath, content, sha });
-      } catch (err) {
-        headFiles.push({ path: shown, fullPath, content: "", error: err.message });
+        headFiles.push({ path: display(relPath), fullPath: path.resolve(rootDir, relPath), content, sha });
+      }
+    }
+  } else {
+    // Head version from disk
+    for (const relPath of candidatePaths) {
+      const fullPath = path.resolve(rootDir, relPath);
+      const shown = display(relPath);
+
+      if (fs.existsSync(fullPath)) {
+        try {
+          const content = fs.readFileSync(fullPath, "utf8").replace(/^\uFEFF/, "");
+          const sha = computeBlobSha(content);
+          headFiles.push({ path: shown, fullPath, content, sha });
+        } catch (err) {
+          headFiles.push({ path: shown, fullPath, content: "", error: err.message });
+        }
       }
     }
   }
@@ -936,4 +1026,31 @@ export async function resolveBasePolicy(repoDir, mergeBase, policyFrom = "base")
   }
 
   return { policyDir: tmpPolicyDir, isBootstrap: false, cleanup };
+}
+
+/**
+ * Evaluates one commit against its parent exactly like `check --changed-from` does: changed facts -> diff -> rules.
+ * opts.headRef (the commit sha) reads the head side from git; opts.preloadedRules (an array) skips the policy folder.
+ * Returns { baseFacts, headFacts, events, findings, candidatePaths }.
+ */
+export async function evaluateChangedCommit(repoDir, baseRef, opts = {}) {
+  const changedRes = await getChangedFacts(repoDir, baseRef, opts, null);
+  const { baseFacts, headFacts, candidatePaths } = changedRes;
+  const diff = diffFacts(baseFacts, headFacts);
+
+  let rules;
+  if (Array.isArray(opts.preloadedRules)) {
+    rules = opts.preloadedRules;
+  } else {
+    const policy = await resolveBasePolicy(repoDir, baseRef, opts.policyFrom || "base");
+    try {
+      const rulesResult = loadRules(opts.rules, { headDir: policy.policyDir, basePath: policy.policyDir, policyDir: policy.policyDir });
+      rules = rulesResult.rules || [];
+    } finally {
+      policy.cleanup();
+    }
+  }
+
+  const evalRes = evaluateRules(rules, diff, baseFacts, headFacts, opts);
+  return { baseFacts, headFacts, events: diff.events, findings: evalRes.findings || [], candidatePaths };
 }

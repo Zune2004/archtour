@@ -12,6 +12,7 @@ import { diffFacts } from "./facts-diff.mjs";
 import { loadRules, evaluateRules, LEVEL_SEVERITY } from "./rules.mjs";
 import { isSqlMigrationCandidate } from "./facts-sql.mjs";
 import { mdText } from "./diff.mjs";
+import { evaluateChangedCommit, resolveBasePolicy } from "./changed.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -330,7 +331,32 @@ export async function auditHistory(targetDir = ".", opts = {}) {
   const allFindings = [];
   const scannedCommits = [];
 
-  const auditResults = await mapConcurrent(commitEntries, 12, async ({ sha, parent }) => {
+  // Each commit is judged with its parent's policy, like the gate. Only the loaded rules array is cached (plain data,
+  // no temp folder), keyed by the parent's .archtour tree id, so concurrent commits never share a policy folder and
+  // one policy id is loaded at most once.
+  const policyCache = new Map();
+  async function loadPolicyRulesForCommit(parent) {
+    let policyId;
+    try {
+      policyId = (await runGit(repoDir, ["rev-parse", "--verify", `${parent}:.archtour`])).trim();
+    } catch {
+      policyId = "none";
+    }
+    if (!policyCache.has(policyId)) {
+      policyCache.set(policyId, (async () => {
+        const policy = await resolveBasePolicy(repoDir, parent, opts.policyFrom || "base");
+        try {
+          const res = loadRules(opts.rules, { headDir: policy.policyDir, basePath: policy.policyDir, policyDir: policy.policyDir });
+          return res.rules || [];
+        } finally {
+          policy.cleanup();
+        }
+      })());
+    }
+    return policyCache.get(policyId);
+  }
+
+  const auditResults = await mapConcurrent(commitEntries, 4, async ({ sha, parent }) => {
     const parentRef = parent || EMPTY_TREE_SHA;
 
     let diffTreeOut;
@@ -355,6 +381,55 @@ export async function auditHistory(targetDir = ".", opts = {}) {
 
     if (candidateChanges.length === 0) {
       return { sha, parent, skipped: true, hasArchitectureChanges: false, findings: [] };
+    }
+
+    // A commit with a parent goes through the same pipeline as `check --changed-from` (migration replay, multi-file
+    // Prisma and GraphQL folders, the parent's policy). The root commit keeps the per-file behaviour below.
+    if (parent) {
+      let evaluation;
+      try {
+        const preloadedRules = await loadPolicyRulesForCommit(parent);
+        evaluation = await evaluateChangedCommit(repoDir, parent, { ...opts, headRef: sha, preloadedRules });
+      } catch (err) {
+        // Never a silent "nothing found": keep why this commit could not be evaluated.
+        return { sha, parent, skipped: true, error: String(err?.message || err), hasArchitectureChanges: false, findings: [] };
+      }
+
+      const hasArchitectureChanges = evaluation.events.length > 0;
+      const commitFindings = [];
+      const activeFindings = (evaluation.findings || []).filter(f => f.level !== "off");
+
+      if (activeFindings.length > 0) {
+        const metadata = await getCommitMetadata(repoDir, sha);
+        const shortSha = sha.slice(0, 7);
+        const url = repoUrl ? `${repoUrl}/commit/${sha}` : null;
+
+        for (const f of activeFindings) {
+          commitFindings.push({
+            ruleId: f.ruleId,
+            level: f.level,
+            message: f.message,
+            source: f.source,
+            event: f.event,
+            owners: f.owners || [],
+            docs: f.docs || null,
+            sha,
+            commit: sha,
+            shortSha,
+            date: metadata.date,
+            subject: metadata.subject,
+            url
+          });
+        }
+      }
+
+      return {
+        sha,
+        parent,
+        skipped: false,
+        hasArchitectureChanges,
+        findings: commitFindings
+      };
     }
 
     const baseFiles = [];

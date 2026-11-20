@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`audit-history` now gives the same result as `check`** for each past commit: it replays the migrations folder,
+  multi-file Prisma schemas and GraphQL folders, and uses the policy of the commit's parent, like the gate. Before, it
+  read only each commit's changed files and could report far fewer findings (one real commit: 27 vs 191). It is also
+  faster (umami, 399 commits: 64 s -> 26 s). A commit that cannot be evaluated is now reported with its error instead
+  of looking like "nothing found".
+
 ## [0.3.0] - 2026-11-20
 
 ### Added
