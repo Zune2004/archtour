@@ -1,0 +1,12 @@
+node_modules
+_workflow
+diagrams
+eval
+examples/*.mp4
+.git
+*.html
+.diagrams-cloud
+.demo-cloud-storage
+video-frames
+*.log
+.DS_Store
