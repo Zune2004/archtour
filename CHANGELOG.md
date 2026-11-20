@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read only each commit's changed files and could report far fewer findings (one real commit: 27 vs 191). It is also
   faster (umami, 399 commits: 64 s -> 26 s). A commit that cannot be evaluated is now reported with its error instead
   of looking like "nothing found".
+- **Line endings:** a commit that only changes LF to CRLF (Windows checkouts with `core.autocrlf`) no longer looks like
+  a schema change.
+- **ClickHouse projections:** `ADD` / `DROP` / `MATERIALIZE` / `CLEAR PROJECTION` are no longer read as a column (a
+  `DROP PROJECTION` was reported as a dropped column).
 
 ## [0.3.0] - 2026-11-20
 

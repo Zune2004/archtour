@@ -905,7 +905,10 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
     for (const relPath of candidatePaths) {
       const res = headResults.get(`${opts.headRef}:${relPath}`);
       if (res && res.content != null) {
-        const content = res.content;
+        let content = res.content;
+        if (typeof content === "string" && !content.includes("\u0000")) {
+          content = content.replace(/\r\n/g, "\n");
+        }
         const sha = computeBlobSha(content);
         headFiles.push({ path: display(relPath), fullPath: path.resolve(rootDir, relPath), content, sha });
       }
@@ -918,7 +921,10 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
 
       if (fs.existsSync(fullPath)) {
         try {
-          const content = fs.readFileSync(fullPath, "utf8").replace(/^\uFEFF/, "");
+          let content = fs.readFileSync(fullPath, "utf8").replace(/^\uFEFF/, "");
+          if (!content.includes("\u0000")) {
+            content = content.replace(/\r\n/g, "\n");
+          }
           const sha = computeBlobSha(content);
           headFiles.push({ path: shown, fullPath, content, sha });
         } catch (err) {
@@ -951,7 +957,10 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
   for (const meta of queryMeta) {
     const res = batchResults.get(meta.query);
     if (res && res.content != null) {
-      const content = res.content;
+      let content = res.content;
+      if (typeof content === "string" && !content.includes("\u0000")) {
+        content = content.replace(/\r\n/g, "\n");
+      }
       const sha = computeBlobSha(content);
       baseFiles.push({ path: meta.shown, fullPath: meta.fullPath, content, sha });
     }

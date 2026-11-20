@@ -763,11 +763,16 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
       for (const action of actions) {
         const act = action.trim();
 
+        // Projections (ClickHouse): ADD / DROP / MATERIALIZE / CLEAR PROJECTION are projections (no column fact, no drop event)
+        if (/^(?:ADD|DROP|MATERIALIZE|CLEAR)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?PROJECTION\b/i.test(act)) {
+          continue;
+        }
+
         // A. ADD COLUMN
         const addColMatch = act.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([\s\S]+)$/i);
         // ADD CONSTRAINT / PRIMARY KEY / FOREIGN KEY / UNIQUE / CHECK / INDEX / KEY are not columns (explicit ADD COLUMN always is)
         const addsColumn = /^ADD\s+COLUMN\b/i.test(act) ||
-          !/^ADD\s+(?:CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|INDEX|KEY|FULLTEXT|SPATIAL|PARTITION)\b/i.test(act);
+          !/^ADD\s+(?:CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|INDEX|KEY|FULLTEXT|SPATIAL|PARTITION|PROJECTION)\b/i.test(act);
         if (addColMatch && addsColumn) {
           const col = parseColumnDef(addColMatch[1]);
           if (col) {
@@ -802,14 +807,14 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
         }
 
         // B. DROP COLUMN (only when the word after DROP is not a keyword)
-        // Keywords after DROP that are NOT columns: CONSTRAINT, INDEX, KEY, PRIMARY, FOREIGN, CHECK, DEFAULT, NOT, PARTITION
+        // Keywords after DROP that are NOT columns: CONSTRAINT, INDEX, KEY, PRIMARY, FOREIGN, CHECK, DEFAULT, NOT, PARTITION, PROJECTION
         const hasExplicitColumn = /^DROP\s+COLUMN\b/i.test(act);
         const dropColMatch = act.match(/^DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?([^\s,(]+)/i);
         if (dropColMatch) {
           const droppedWord = dropColMatch[1].trim().toUpperCase();
           const isNonColumnKeyword = [
             "CONSTRAINT", "INDEX", "KEY", "PRIMARY", "FOREIGN",
-            "CHECK", "DEFAULT", "NOT", "PARTITION"
+            "CHECK", "DEFAULT", "NOT", "PARTITION", "PROJECTION"
           ].includes(droppedWord);
           const isColumnDrop = hasExplicitColumn || !isNonColumnKeyword;
           if (isColumnDrop) {
