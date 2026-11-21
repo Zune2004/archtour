@@ -1096,6 +1096,29 @@ export function evaluateRules(rules = [], diffResult = {}, baseFacts = {}, headF
   // entity.removed of db.table ~ sql.drop_table
   // Keep the more specific one (the sql.* one) at the HIGHER of the two levels,
   // and list the other rule id under "also matched".
+  const normalizeCol = (raw) => {
+    if (!raw) return "";
+    let str = String(raw).trim();
+    if (str.startsWith("db.column:")) str = str.slice("db.column:".length).trim();
+    str = str.replace(/^["`]|["`]$/g, "").trim();
+    const parts = str.split(".").map(p => p.replace(/^["`]|["`]$/g, "").trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`.toLowerCase();
+    }
+    return str.toLowerCase();
+  };
+
+  const normalizeTbl = (raw) => {
+    if (!raw) return "";
+    let str = String(raw).trim();
+    if (str.startsWith("db.table:")) str = str.slice("db.table:".length).trim();
+    if (str.startsWith("db.model:")) str = str.slice("db.model:".length).trim();
+    str = str.replace(/^["`]|["`]$/g, "").trim();
+    const parts = str.split(".").map(p => p.replace(/^["`]|["`]$/g, "").trim()).filter(Boolean);
+    if (parts.length > 0) str = parts[parts.length - 1];
+    return str.toLowerCase();
+  };
+
   const DEDUPE_PAIRS = [
     {
       generic: "db.field_removed",
@@ -1106,7 +1129,13 @@ export function evaluateRules(rules = [], diffResult = {}, baseFacts = {}, headF
         if (gId && sId && gId === sId) return true;
         const gBefore = (g.event?.before || "").toLowerCase();
         const sBefore = (s.event?.before || "").toLowerCase();
-        return Boolean(gBefore && sBefore && gBefore === sBefore);
+        if (gBefore && sBefore && gBefore === sBefore) return true;
+        if (g.event?.dbTable && g.event?.dbColumn) {
+          const gDb = normalizeCol(`${g.event.dbTable}.${g.event.dbColumn}`);
+          const sCol = normalizeCol(s.event?.before || s.event?.entityId || "");
+          if (gDb && sCol && gDb === sCol) return true;
+        }
+        return false;
       }
     },
     {
@@ -1119,6 +1148,18 @@ export function evaluateRules(rules = [], diffResult = {}, baseFacts = {}, headF
         const gEntity = (g.event?.entityId || g.event?.before || "").toLowerCase();
         const sEntity = (s.event?.entityId || s.event?.before || "").toLowerCase();
         return Boolean(gEntity && sEntity && gEntity === sEntity);
+      }
+    },
+    {
+      generic: "db.model_removed",
+      specific: "sql.drop_table",
+      matchEntity: (g, s) => {
+        const gId = (g.event?.entityId || "").toLowerCase();
+        const sId = (s.event?.entityId || "").toLowerCase();
+        if (gId && sId && gId === sId) return true;
+        const gTable = normalizeTbl(g.event?.dbTable || g.event?.before || g.event?.entityId || "");
+        const sTable = normalizeTbl(s.event?.before || s.event?.entityId || "");
+        return Boolean(gTable && sTable && gTable === sTable);
       }
     },
     {

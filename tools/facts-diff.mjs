@@ -515,8 +515,12 @@ export function diffFacts(base = {}, head = {}) {
   // T-107b: a Prisma schema split across files still knows every model. A field whose type is a model anywhere in the
   // base schema is a relation field, not a column, even when the model lives in another .prisma file.
   const baseModelNames = new Set();
+  const baseModelsByName = new Map();
   for (const baseEnt of baseEntities.values()) {
-    if (baseEnt.kind === "db.model") baseModelNames.add(baseEnt.name);
+    if (baseEnt.kind === "db.model") {
+      baseModelNames.add(baseEnt.name);
+      baseModelsByName.set(baseEnt.name, baseEnt);
+    }
   }
 
   // 2. Removed Entities (only when not truncated)
@@ -529,11 +533,13 @@ export function diffFacts(base = {}, head = {}) {
         }
         if (baseEnt.kind === "db.model") {
           if (renamedModelIds.has(baseEnt.id)) continue;
+          const dbTable = baseEnt.attrs?.mappedTable || baseEnt.attrs?.tableName || baseEnt.name;
           events.push({
             type: "db.model_removed",
             entityId: baseEnt.id,
             kind: baseEnt.kind,
             before: baseEnt.name,
+            dbTable,
             source: baseEnt.source,
             message: `Database model '${baseEnt.name}' was removed`
           });
@@ -544,11 +550,16 @@ export function diffFacts(base = {}, head = {}) {
           if (baseEnt.attrs?.relation === true) continue;
           if (baseEnt.attrs?.type && baseModelNames.has(baseEnt.attrs.type)) continue;
           if (!removedModelNames.has(baseEnt.attrs?.model)) {
+            const baseModel = baseModelsByName.get(baseEnt.attrs?.model);
+            const dbTable = baseModel?.attrs?.mappedTable || baseModel?.attrs?.tableName || baseEnt.attrs?.model;
+            const dbColumn = baseEnt.attrs?.mappedColumn || baseEnt.attrs?.columnName || baseEnt.attrs?.name || baseEnt.name;
             events.push({
               type: "db.field_removed",
               entityId: baseEnt.id,
               kind: baseEnt.kind,
               before: `${baseEnt.attrs?.model}.${baseEnt.attrs?.name}`,
+              dbTable,
+              dbColumn,
               source: baseEnt.source,
               message: `Database field '${baseEnt.attrs?.model}.${baseEnt.attrs?.name}' was removed`
             });

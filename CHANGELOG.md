@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a schema change.
 - **ClickHouse projections:** `ADD` / `DROP` / `MATERIALIZE` / `CLEAR PROJECTION` are no longer read as a column (a
   `DROP PROJECTION` was reported as a dropped column).
+- **One finding per real removal:** a Prisma model or field removed together with its `DROP TABLE` / `DROP COLUMN`
+  is now reported once (the SQL finding, with the Prisma rule under "Also matched"), also when the names differ through
+  `@map` / `@@map`. Before, it was reported twice, and a removed model was never merged with its `DROP TABLE`.
 
 ## [0.3.0] - 2026-11-20
 
