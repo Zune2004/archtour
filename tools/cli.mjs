@@ -32,7 +32,7 @@ import {
 } from "./rules.mjs";
 import { auditHistory } from "./history.mjs";
 import { setSettings } from "./settings.mjs";
-import { helmAvailable } from "./helm-render.mjs";
+import { helmAvailable, loadHelmConfig } from "./helm-render.mjs";
 
 // ---------------------------------------------------------------- helpers
 
@@ -579,6 +579,16 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       console.error(w.message || w);
     }
   }
+
+  // The Helm policy is read from the same policy folder as rules.yml (the base branch by default).
+  let helmConfig;
+  try {
+    helmConfig = loadHelmConfig(policyDir);
+  } catch (err) {
+    policyCleanup();
+    die(err.message, err.exitCode || 3);
+  }
+  opts = { ...opts, helmConfig };
 
   let baseFacts = { entities: [], relations: [] };
   let headFacts = { entities: [], relations: [] };

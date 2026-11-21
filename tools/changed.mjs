@@ -806,7 +806,146 @@ function markChartTemplatesSkipped(files, chartDirDisplay, reason) {
   }
 }
 
-async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, headFiles, opts, display }) {
+// Reads a file from one side of the comparison: the ref's tree, or the working tree when there is no ref.
+async function readChartFileAtSide(rootDir, ref, repoPath) {
+  if (ref) {
+    try {
+      const { stdout } = await execFileAsync("git", ["show", `${ref}:${repoPath}`], {
+        cwd: rootDir,
+        encoding: "utf8",
+        maxBuffer: 50 * 1024 * 1024
+      });
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return fs.readFileSync(path.join(rootDir, ...repoPath.split("/")), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function chartHelmEntry(helmConfig, chartDir, chartDisplay) {
+  const charts = helmConfig && helmConfig.charts;
+  if (!charts) return null;
+  return charts[chartDisplay] || charts[chartDir] || null;
+}
+
+// The values a chart is rendered with: its helm.yml entry, else the first ci/*-values.yaml from the base tree.
+// Values files are read from the base side so the PR cannot choose the overrides it is checked with.
+async function resolveChartValues(rootDir, mergeBase, chart, chartDisplay, opts, valuesDir) {
+  const entry = chartHelmEntry(opts.helmConfig, chart.dir, chartDisplay);
+  const set = entry && entry.set ? entry.set : {};
+  let relativeFiles = entry && Array.isArray(entry.values) && entry.values.length > 0 ? entry.values : null;
+
+  if (!relativeFiles) {
+    // A chart that is new in the PR has no base side, hence no ci/ fallback.
+    if (!chart.atBase) return { valuesFiles: [], set };
+    const prefix = chart.dir ? `${chart.dir}/` : "";
+    const ciDir = chart.dir ? `${chart.dir}/ci` : "ci";
+    const baseFiles = await listFilesAtRef(rootDir, mergeBase, ciDir);
+    const ciFiles = baseFiles
+      .filter(p => p.startsWith(`${prefix}ci/`))
+      .map(p => p.slice(prefix.length))
+      .filter(p => /^ci\/[^/]+-values\.ya?ml$/.test(p))
+      .sort();
+    relativeFiles = ciFiles.length > 0 ? [ciFiles[0]] : [];
+  }
+
+  const valuesFiles = [];
+  for (let i = 0; i < relativeFiles.length; i++) {
+    const relative = relativeFiles[i];
+    const repoPath = chart.dir ? `${chart.dir}/${relative}` : relative;
+    const baseRef = chart.atBase ? mergeBase : (opts.headRef || null);
+    const content = await readChartFileAtSide(rootDir, baseRef, repoPath);
+    if (content == null) return { missing: relative };
+    const dest = path.join(valuesDir, `${i}-${path.basename(relative)}`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, content);
+    valuesFiles.push(dest);
+  }
+  return { valuesFiles, set };
+}
+
+// A path relative to the chart folder, resolved inside the repo; null when it escapes.
+function safeRepoJoin(chartDir, relative) {
+  const norm = String(relative || "").replace(/\\/g, "/").replace(/^\.\//, "");
+  if (norm.startsWith("/") || /^[A-Za-z]:/.test(norm)) return null;
+  const joined = path.posix.normalize(path.posix.join(chartDir || ".", norm));
+  if (joined === "." || joined === ".." || joined.startsWith("../")) return null;
+  return joined.replace(/\/+$/, "");
+}
+
+function isVendoredDependency(tmpChartDir, name) {
+  const chartsDir = path.join(tmpChartDir, "charts");
+  if (!fs.existsSync(chartsDir)) return false;
+  const depDir = path.join(chartsDir, name);
+  if (fs.existsSync(path.join(depDir, "Chart.yaml"))) {
+    try {
+      const doc = YAML.parse(fs.readFileSync(path.join(depDir, "Chart.yaml"), "utf8"));
+      if (doc && doc.name === name) return true;
+    } catch {}
+  }
+  try {
+    return fs.readdirSync(chartsDir).some(f => f.startsWith(`${name}-`) && f.endsWith(".tgz"));
+  } catch {
+    return false;
+  }
+}
+
+// Vendors local file:// dependencies into the temp chart and removes remote ones from the temp Chart.yaml (never
+// downloaded). Returns the remote dependencies in Chart.yaml order. Only the temp folders are written to.
+async function prepareChartDependencies(tmpChartDir, { rootDir, ref, chartDir, useDisk }) {
+  const chartYamlPath = path.join(tmpChartDir, "Chart.yaml");
+  let doc;
+  try {
+    doc = YAML.parse(fs.readFileSync(chartYamlPath, "utf8"));
+  } catch {
+    return [];
+  }
+  const dependencies = doc && Array.isArray(doc.dependencies) ? doc.dependencies : [];
+  if (dependencies.length === 0) return [];
+
+  const kept = [];
+  const remote = [];
+  for (const dep of dependencies) {
+    const name = dep && typeof dep.name === "string" ? dep.name : "";
+    if (!name || isVendoredDependency(tmpChartDir, name)) {
+      kept.push(dep);
+      continue;
+    }
+    const repository = typeof dep.repository === "string" ? dep.repository : "";
+    if (repository.startsWith("file://")) {
+      const depDir = safeRepoJoin(chartDir, repository.slice("file://".length));
+      if (depDir) {
+        const dest = path.join(tmpChartDir, "charts", name);
+        fs.mkdirSync(dest, { recursive: true });
+        const copied = useDisk
+          ? materializeChartFromDisk(rootDir, depDir, dest)
+          : await materializeChartAtRef(rootDir, ref, depDir, dest);
+        if (copied) {
+          kept.push(dep);
+          continue;
+        }
+        fs.rmSync(dest, { recursive: true, force: true });
+      }
+    }
+    remote.push({ name, repository });
+  }
+
+  if (remote.length > 0) {
+    doc.dependencies = kept;
+    fs.writeFileSync(chartYamlPath, YAML.stringify(doc));
+    try {
+      fs.rmSync(path.join(tmpChartDir, "Chart.lock"), { force: true });
+    } catch {}
+  }
+  return remote;
+}
+
+async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, headFiles, opts, display, helmNotices }) {
   const charts = await findTouchedCharts(rootDir, mergeBase, changedPaths, opts);
   if (charts.length === 0) return;
 
@@ -829,8 +968,26 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
           ? await materializeChartAtRef(rootDir, opts.headRef, chartDir, headTmp)
           : materializeChartFromDisk(rootDir, chartDir, headTmp));
 
-      const baseRender = baseExists ? await renderChart(baseTmp, { helmBin: opts.helmBin }) : null;
-      const headRender = headExists ? await renderChart(headTmp, { helmBin: opts.helmBin }) : null;
+      const valuesDir = path.join(tmpRoot, `${index}-values`);
+      const values = baseExists || headExists
+        ? await resolveChartValues(rootDir, mergeBase, chart, chartDisplay, opts, valuesDir)
+        : { valuesFiles: [], set: {} };
+      if (values.missing) {
+        const reason = `Helm values file ${values.missing} not found in the base branch`;
+        markChartTemplatesSkipped(baseFiles, chartDisplay, reason);
+        markChartTemplatesSkipped(headFiles, chartDisplay, reason);
+        continue;
+      }
+
+      const baseRemote = baseExists
+        ? await prepareChartDependencies(baseTmp, { rootDir, ref: mergeBase, chartDir, useDisk: false })
+        : [];
+      const headRemote = headExists
+        ? await prepareChartDependencies(headTmp, { rootDir, ref: opts.headRef || null, chartDir, useDisk: !opts.headRef })
+        : [];
+      const renderOpts = { helmBin: opts.helmBin, valuesFiles: values.valuesFiles, set: values.set };
+      const baseRender = baseExists ? await renderChart(baseTmp, renderOpts) : null;
+      const headRender = headExists ? await renderChart(headTmp, renderOpts) : null;
 
       const baseOk = !baseExists || Boolean(baseRender && baseRender.ok);
       const headOk = !headExists || Boolean(headRender && headRender.ok);
@@ -840,6 +997,12 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
         removeChartTemplates(headFiles, chartDisplay);
         if (baseRender && baseRender.ok) addRenderedDocs(baseFiles, chartDisplay, baseRender.docs, rootDir);
         if (headRender && headRender.ok) addRenderedDocs(headFiles, chartDisplay, headRender.docs, rootDir);
+        const remoteDeps = headExists ? headRemote : baseRemote;
+        if (remoteDeps.length > 0) {
+          const list = remoteDeps.map(d => `${d.name} (${d.repository})`).join(", ");
+          const message = `Helm chart ${chartDisplay}: dependencies not vendored, rendered without them: ${list}; vendor them in charts/ to check them`;
+          helmNotices.push({ chart: chartDisplay, message });
+        }
       } else {
         const failed = [baseRender, headRender].find(r => r && !r.ok);
         const reason = `Helm template: helm template failed (${failed ? failed.error : "unknown error"}); render it in CI and scan the output`;
@@ -967,8 +1130,9 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
   }
 
   // Render every touched Helm chart and replace its raw templates with the rendered manifests.
+  const helmNotices = [];
   if (opts.renderHelm === "on") {
-    await renderHelmCharts({ rootDir, mergeBase, changedPaths: allChanged, baseFiles, headFiles, opts, display });
+    await renderHelmCharts({ rootDir, mergeBase, changedPaths: allChanged, baseFiles, headFiles, opts, display, helmNotices });
   }
 
   // Build addedCharts: Chart.yaml/Chart.yml files added by the change. Look at every changed file, not only the scanned
@@ -999,6 +1163,7 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
 
   const baseFacts = await extractFactsWithCache(baseFiles, cache, { rootDir, addedCharts });
   const headFacts = await extractFactsWithCache(headFiles, cache, { rootDir, addedCharts });
+  if (helmNotices.length > 0) headFacts._helmDependencyNotices = helmNotices;
 
   // Add folder skip notices: files in rawChanged that are not candidates but whose basename is a candidate
   // and are excluded only by default skipped folders (not user --ignore)

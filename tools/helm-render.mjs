@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import YAML from "yaml";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +90,74 @@ function splitDocuments(stdout) {
   return docs;
 }
 
+function helmConfigError(message) {
+  const err = new Error(`Invalid Helm configuration (.archtour/helm.yml): ${message}`);
+  err.exitCode = 3;
+  return err;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// A values path is relative to the chart folder and must stay inside it.
+function isSafeChartRelativePath(p) {
+  if (typeof p !== "string" || !p.trim()) return false;
+  const norm = p.replace(/\\/g, "/");
+  if (norm.startsWith("/") || /^[A-Za-z]:/.test(norm)) return false;
+  return !norm.split("/").includes("..");
+}
+
+/**
+ * Loads and validates the optional `.archtour/helm.yml` (or `.archtour/helm.yaml`) from the policy folder.
+ * Returns { version: 1, charts: { "<chart dir>": { values: [...], set: {...} } } } or null when absent.
+ */
+export function loadHelmConfig(policyDir) {
+  const archtour = path.join(policyDir, ".archtour");
+  const file = [path.join(archtour, "helm.yml"), path.join(archtour, "helm.yaml")].find(f => fs.existsSync(f));
+  if (!file) return null;
+
+  let doc;
+  try {
+    doc = YAML.parse(fs.readFileSync(file, "utf8"), { merge: true, logLevel: "error" });
+  } catch (err) {
+    throw helmConfigError(`failed to parse YAML in "${file}": ${err.message}`);
+  }
+
+  if (!isPlainObject(doc)) throw helmConfigError(`expected a mapping with "version: 1" in "${file}"`);
+  for (const key of Object.keys(doc)) {
+    if (key !== "version" && key !== "charts") throw helmConfigError(`unknown key "${key}" in "${file}"`);
+  }
+  if (doc.version !== 1) throw helmConfigError(`"version" must be 1 in "${file}"`);
+  if (doc.charts != null && !isPlainObject(doc.charts)) throw helmConfigError(`"charts" must be a mapping in "${file}"`);
+
+  const charts = {};
+  for (const [chartDir, entry] of Object.entries(doc.charts || {})) {
+    if (!chartDir.trim()) throw helmConfigError(`empty chart folder in "${file}"`);
+    if (!isPlainObject(entry)) throw helmConfigError(`chart "${chartDir}" must be a mapping`);
+    for (const key of Object.keys(entry)) {
+      if (key !== "values" && key !== "set") throw helmConfigError(`unknown key "${key}" for chart "${chartDir}"`);
+    }
+    const values = entry.values == null ? [] : (Array.isArray(entry.values) ? entry.values : null);
+    if (!values) throw helmConfigError(`"values" for chart "${chartDir}" must be a list`);
+    for (const valueFile of values) {
+      if (!isSafeChartRelativePath(valueFile)) {
+        throw helmConfigError(`values file "${valueFile}" for chart "${chartDir}" must be relative to the chart folder and stay inside it`);
+      }
+    }
+    const set = entry.set == null ? {} : entry.set;
+    if (!isPlainObject(set)) throw helmConfigError(`"set" for chart "${chartDir}" must be a mapping`);
+    for (const [key, value] of Object.entries(set)) {
+      if (!key.trim()) throw helmConfigError(`empty "set" key for chart "${chartDir}"`);
+      if (!["string", "number", "boolean"].includes(typeof value)) {
+        throw helmConfigError(`"set" value for "${key}" in chart "${chartDir}" must be a string, number or boolean`);
+      }
+    }
+    charts[chartDir] = { values: [...values], set: { ...set } };
+  }
+  return { version: 1, charts };
+}
+
 /**
  * Renders a Helm chart folder with `helm template`.
  * Returns { ok: true, docs: [{ source, content }] } or { ok: false, error: "<first stderr line>" }.
@@ -97,10 +166,19 @@ export async function renderChart(chartDirOnDisk, opts = {}) {
   const helmBin = opts.helmBin || "helm";
   const helmHome = createHelmEnv();
   try {
-    const { file, args } = helmCommand(helmBin, ["template", "archtour", chartDirOnDisk, "--namespace", "default"]);
+    const args = ["template", "archtour", chartDirOnDisk, "--namespace", "default"];
+    for (const valuesFile of opts.valuesFiles || []) {
+      args.push("-f", valuesFile);
+    }
+    for (const [key, value] of Object.entries(opts.set || {})) {
+      // Values files come from the base branch; `set` values are part of the same base policy.
+      if (typeof value === "string") args.push("--set-string", `${key}=${value}`);
+      else args.push("--set", `${key}=${value}`);
+    }
+    const { file, args: fileArgs } = helmCommand(helmBin, args);
     let stdout;
     try {
-      ({ stdout } = await execFileAsync(file, args, {
+      ({ stdout } = await execFileAsync(file, fileArgs, {
         env: helmHome.env,
         encoding: "utf8",
         timeout: TIMEOUT_MS,

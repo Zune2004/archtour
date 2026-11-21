@@ -1038,6 +1038,30 @@ export function evaluateRules(rules = [], diffResult = {}, baseFacts = {}, headF
     }
   }
 
+  // Helm charts rendered without their unvendored dependencies are reported once per chart as an advisory notice.
+  for (const notice of Array.isArray(headFacts?._helmDependencyNotices) ? headFacts._helmDependencyNotices : []) {
+    const noticeRule = rules.find(r => r.id === "file-not-checked");
+    if (!noticeRule || noticeRule.level === "off") continue;
+    findings.push({
+      ruleId: noticeRule.id,
+      level: "advisory",
+      event: {
+        type: "file.not_checked",
+        entityId: `file:${notice.chart}`,
+        kind: "file",
+        source: { file: notice.chart, line: 1 },
+        after: notice.message,
+        reason: notice.message,
+        message: notice.message
+      },
+      message: notice.message,
+      detail: notice.message,
+      owners: Array.isArray(noticeRule.owners) ? [...noticeRule.owners] : (noticeRule.owners ? [noticeRule.owners] : []),
+      docs: noticeRule.docs || "https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#file-not-checked",
+      source: { file: notice.chart, line: 1 }
+    });
+  }
+
   // A candidate file whose BASE version was skipped for size or could not be parsed, while the head version parsed:
   // removals cannot be detected (review-6 N6: a 6 MB OpenAPI base cut to 2,000 routes passed with no finding). Emit a
   // soft file-not-checked naming the base reason instead of staying silent.
@@ -1482,6 +1506,32 @@ export function diffPolicy(baseDir, headDir, opts = {}) {
     if (!baseRulesMap.has(id)) {
       allChanges.push(`Rule "${id}" added (${headRule.level})`);
     }
+  }
+
+  // 1b. Helm policy diff: the values and dependencies a PR is checked with must not be chosen by the PR itself.
+  const readPolicyFile = (file) => {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const baseHelmFile = [
+    path.join(baseArchtour, "helm.yml"),
+    path.join(baseArchtour, "helm.yaml")
+  ].find(f => fs.existsSync(f)) || null;
+  const headHelmFile = [
+    path.join(headArchtour, "helm.yml"),
+    path.join(headArchtour, "helm.yaml")
+  ].find(f => fs.existsSync(f)) || null;
+  if (readPolicyFile(baseHelmFile) !== readPolicyFile(headHelmFile)) {
+    loosening.push({
+      type: "helm-changed",
+      ruleId: "policy:.archtour",
+      description: `Config "helm.yml" changed`,
+      owners: []
+    });
+    allChanges.push(`Config "helm.yml" changed`);
   }
 
   // 2. Exceptions diff

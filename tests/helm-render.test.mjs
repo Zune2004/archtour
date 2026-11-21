@@ -144,7 +144,7 @@ test("d. --render-helm off keeps today's soft changed-file-not-checked", { skip:
   }
 });
 
-test("e. a chart with a missing vendored dependency falls back to a soft not-checked finding", { skip: SKIP_HELM }, () => {
+test("e. a chart with an unvendored remote dependency renders with an advisory notice", { skip: SKIP_HELM }, () => {
   const dependencies = "  - name: missing\n    version: 1.0.0\n    repository: https://example.com/charts\n";
   const template = DEPLOY_TEMPLATE.replace("        app: web\n", "        app: web\n        version: \"1\"\n");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-helm-"));
@@ -155,11 +155,12 @@ test("e. a chart with a missing vendored dependency falls back to a soft not-che
   writeChart(dir, { dependencies, template });
   try {
     const run = runCheck(dir, base);
-    assert.equal(run.status, 2, run.stderr || run.stdout);
-    const finding = findingById(run.json, "changed-file-not-checked");
-    assert.ok(finding, `expected changed-file-not-checked in ${run.stdout}`);
-    assert.equal(finding.level, "soft");
-    assert.match(String(finding.detail || finding.message), /helm template failed/);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.equal(findingById(run.json, "changed-file-not-checked"), undefined);
+    const finding = findingById(run.json, "file-not-checked");
+    assert.ok(finding, `expected file-not-checked in ${run.stdout}`);
+    assert.equal(finding.level, "advisory");
+    assert.match(String(finding.detail || finding.message), /dependencies not vendored, rendered without them: missing \(https:\/\/example\.com\/charts\)/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

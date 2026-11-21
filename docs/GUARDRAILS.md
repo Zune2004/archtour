@@ -393,6 +393,37 @@ To scan Helm charts with Archtour Guardrails:
    archtour check ./base-manifests ./manifests
    ```
 
+#### Helm values and dependencies
+
+Real charts usually need values and dependencies, so the chart is rendered with the same inputs it has in CI. Values
+and dependencies are described in an optional policy file, `.archtour/helm.yml`, read from the same policy folder as
+`rules.yml` (the base branch by default):
+
+```yaml
+version: 1
+charts:
+  charts/formbricks:                 # chart folder, relative to the scanned folder
+    values: [ci/qa-values.yaml]      # optional, files relative to the chart folder
+    set:                             # optional; strings, numbers or booleans
+      formbricks.webappUrl: https://qa.example.com
+```
+
+Without an entry, a chart with `ci/*-values.yaml` (the chart-testing convention) is rendered with the first such file
+in sorted order. Otherwise it is rendered with its own `values.yaml` only.
+
+**Values files are read from the base branch** and used for both sides, so a pull request cannot choose the overrides
+it is checked with (editing `ci/default-values.yaml` to set `privileged: false` does not hide a `privileged: true` it
+adds to `values.yaml`). A listed file that is missing in the base branch is reported with `changed-file-not-checked`
+naming the file; the chart is not rendered. A chart that is new in the pull request has no base side, so it gets the
+`helm.yml` values and no `ci/` fallback.
+
+Local dependencies (`repository: file://../common`) are copied from the same side into `charts/<name>` of the temporary
+chart. Dependencies that cannot be vendored locally are left out of the temporary `Chart.yaml` (and `Chart.lock`) and
+recorded with one advisory `file-not-checked` finding naming them: `vendor them in charts/ to check them`. Advisory
+findings never change the exit code, so an unvendored remote dependency does not block the pull request. Archtour
+never downloads anything: no `helm repo` or `helm dependency` command is run, and only the temporary chart folders are
+written to.
+
 <a id="graphql"></a>
 ### 7.3 GraphQL
 

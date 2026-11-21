@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `values.yaml` is now caught). `--render-helm auto|on|off` (default `auto`), `--helm-bin`, Action input `render-helm`.
   A chart that cannot be rendered (required values, dependencies not vendored in `charts/`) still blocks with
   `changed-file-not-checked`, and the reason now quotes helm's error.
+- **Real-world charts render:** values come from an optional `.archtour/helm.yml` (`set` and `values` per chart) or the
+  chart's `ci/*-values.yaml` (the chart-testing convention), and are always read from the base branch, so a PR cannot
+  pick the values it is checked with. Local `file://` dependencies are copied from the repo; remote ones that are not
+  vendored in `charts/` are left out (nothing is ever downloaded) with one advisory notice per chart. A change to
+  `helm.yml` is reported as a policy change.
 
 ### Fixed
 - **`audit-history` now gives the same result as `check`** for each past commit: it replays the migrations folder,

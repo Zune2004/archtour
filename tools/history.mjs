@@ -13,7 +13,7 @@ import { loadRules, evaluateRules, LEVEL_SEVERITY } from "./rules.mjs";
 import { isSqlMigrationCandidate } from "./facts-sql.mjs";
 import { mdText } from "./md.mjs";
 import { evaluateChangedCommit, resolveBasePolicy } from "./changed.mjs";
-import { helmAvailable } from "./helm-render.mjs";
+import { helmAvailable, loadHelmConfig } from "./helm-render.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -352,7 +352,7 @@ export async function auditHistory(targetDir = ".", opts = {}) {
         const policy = await resolveBasePolicy(repoDir, parent, opts.policyFrom || "base");
         try {
           const res = loadRules(opts.rules, { headDir: policy.policyDir, basePath: policy.policyDir, policyDir: policy.policyDir });
-          return res.rules || [];
+          return { rules: res.rules || [], helmConfig: loadHelmConfig(policy.policyDir) };
         } finally {
           policy.cleanup();
         }
@@ -393,8 +393,8 @@ export async function auditHistory(targetDir = ".", opts = {}) {
     if (parent) {
       let evaluation;
       try {
-        const preloadedRules = await loadPolicyRulesForCommit(parent);
-        evaluation = await evaluateChangedCommit(repoDir, parent, { ...opts, headRef: sha, preloadedRules });
+        const policy = await loadPolicyRulesForCommit(parent);
+        evaluation = await evaluateChangedCommit(repoDir, parent, { ...opts, headRef: sha, preloadedRules: policy.rules, helmConfig: policy.helmConfig });
       } catch (err) {
         // Never a silent "nothing found": keep why this commit could not be evaluated.
         return { sha, parent, skipped: true, error: String(err?.message || err), hasArchitectureChanges: false, findings: [] };
