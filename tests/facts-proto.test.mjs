@@ -9,7 +9,7 @@ import { performance } from "node:perf_hooks";
 import { extractFacts } from "../tools/facts.mjs";
 import { diffFacts } from "../tools/facts-diff.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 // 1. Nested messages
 test("protobuf parser extracts nested messages and fields with hierarchical names and ids", () => {

@@ -298,7 +298,7 @@ runs:
         fi
 
         set +e
-        node "$ACTION_PATH/tools/diagram.mjs" check "${CHECK_ARGS[@]}" > "$OUTPUT_DIR/check-result.json" 2> "$OUTPUT_DIR/check.err"
+        node "$ACTION_PATH/tools/cli.mjs" check "${CHECK_ARGS[@]}" > "$OUTPUT_DIR/check-result.json" 2> "$OUTPUT_DIR/check.err"
         CHECK_EXIT=$?
         set -e
 

@@ -17,7 +17,7 @@ import {
   TERRAFORM_RULES
 } from "../tools/facts-terraform.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 function makePlan(resourceChanges = [], extra = {}) {
   return JSON.stringify({

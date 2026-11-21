@@ -9,7 +9,7 @@ import { performance } from "node:perf_hooks";
 import { extractFacts } from "../tools/facts.mjs";
 import { diffFacts } from "../tools/facts-diff.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 // 1. Prisma extraction
 test("extractFacts extracts db.model, db.field, and db.relation from Prisma schema", () => {

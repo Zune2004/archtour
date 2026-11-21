@@ -134,8 +134,8 @@ It runs completely offline in CI and is 100% MIT open-source. Try `npx archtour 
 
 | Claim | Command or file that demonstrates it | Verified (yes/no) |
 |---|---|---|
-| Guardrails check on changed files against base branch | `node tools/diagram.mjs check --changed-from HEAD~1 .` | yes (verified in tests) |
-| Policy loaded from base branch (`--policy-from base`) | `tools/rules.mjs`, `tools/diagram.mjs` | yes (verified in tests) |
+| Guardrails check on changed files against base branch | `node tools/cli.mjs check --changed-from HEAD~1 .` | yes (verified in tests) |
+| Policy loaded from base branch (`--policy-from base`) | `tools/rules.mjs`, `tools/cli.mjs` | yes (verified in tests) |
 | SQL migration checks (`DROP TABLE`, `DROP COLUMN`, non-concurrent index, type narrowing, edited migration) | `tools/facts-sql.mjs`, `tools/rules-recommended.mjs` | yes (verified in tests) |
 | Prisma schema checks (dropped models/fields, type changes) | `tools/facts.mjs`, `tools/rules-recommended.mjs` | yes (verified in tests) |
 | OpenAPI contract checks (removed routes, removed security, required params) | `tools/facts.mjs`, `tools/rules-recommended.mjs` | yes (verified in tests) |

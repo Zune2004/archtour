@@ -11,7 +11,7 @@ import { extractFacts } from "./facts.mjs";
 import { diffFacts } from "./facts-diff.mjs";
 import { loadRules, evaluateRules, LEVEL_SEVERITY } from "./rules.mjs";
 import { isSqlMigrationCandidate } from "./facts-sql.mjs";
-import { mdText } from "./diff.mjs";
+import { mdText } from "./md.mjs";
 import { evaluateChangedCommit, resolveBasePolicy } from "./changed.mjs";
 import { helmAvailable } from "./helm-render.mjs";
 

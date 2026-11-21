@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { RECOMMENDED_RULES } from "./rules-recommended.mjs";
-import { mdText } from "./diff.mjs";
+import { mdText } from "./md.mjs";
 import { isSqlMigrationCandidate } from "./facts-sql.mjs";
 
 export const LEVELS = ["off", "advisory", "warn", "soft", "hard"];

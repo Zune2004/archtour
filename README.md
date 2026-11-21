@@ -30,12 +30,12 @@ npx archtour check --changed-from origin/main .
 > Untracked files are not checked unless `--include-untracked`; commit (or pass the flag) first.
 
 Not on npm yet? Run it from a clone: `git clone https://github.com/Zune2004/archtour && cd archtour && npm ci`, then
-`node tools/diagram.mjs check --changed-from origin/main /path/to/your/repo`.
+`node tools/cli.mjs check --changed-from origin/main /path/to/your/repo`.
 
 To audit past commits across your repository history, run `audit-history` as the second command:
 
 ```bash
-node tools/diagram.mjs audit-history . --max-commits 200
+node tools/cli.mjs audit-history . --max-commits 200
 ```
 
 > [!NOTE]

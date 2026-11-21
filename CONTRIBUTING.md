@@ -22,7 +22,7 @@
 
 ## Code Layout
 
-- `tools/` - Core renderer, CLI (`tools/diagram.mjs`), parsers, and viewer.
+- `tools/` - CLI (`tools/cli.mjs`), parsers, rules and the PR comment.
 - `tests/` - Automated test suite.
 - `docs/` - Specification, documentation, and prompt guides.
 

@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { isSqlMigrationCandidate } from "../tools/facts-sql.mjs";
 import { setSettings, resetSettings, getMaxFileBytes, getMigrationDirs } from "../tools/settings.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 // Settings are process-wide; each test file is its own process, and tests inside a
 // file run one after another, so resetting after each test is enough.

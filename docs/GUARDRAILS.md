@@ -565,7 +565,7 @@ Archtour Guardrails integrates directly into GitHub Actions via `uses: Zune2004/
 
 | Input | Description | Default |
 |---|---|---|
-| `mode` | `check` (architecture guardrails gate, default), `diff` (visual diff only), or `both` (combined) | `check` |
+| `mode` | `check` (the guardrails gate; the only mode) | `check` |
 | `strict-release` | When `true`, un-overridden soft findings fail release, tag, or push runs | `false` |
 | `github-token` | Token used for GitHub API checks (comments, collaborators, teams). Note: `@org/team` owners require a GitHub App or fine-grained PAT with `Members: read`. | `${{ github.token }}` |
 | `comment` | Whether to post or update a PR comment | `true` |

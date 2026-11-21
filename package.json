@@ -5,7 +5,7 @@
   "description": "Blocks risky pull requests: dropped columns, breaking API changes, privileged containers, public ports, deleted databases. Open source, runs in your CI.",
   "license": "MIT",
   "bin": {
-    "archtour": "tools/diagram.mjs"
+    "archtour": "tools/cli.mjs"
   },
   "engines": {
     "node": ">=22.12"
@@ -36,8 +36,8 @@
   ],
   "scripts": {
     "test": "node --test --test-concurrency=4 tests/*.test.mjs",
-    "check": "node tools/diagram.mjs check",
-    "archtour": "node tools/diagram.mjs"
+    "check": "node tools/cli.mjs check",
+    "archtour": "node tools/cli.mjs"
   },
   "repository": {
     "type": "git",

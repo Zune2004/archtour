@@ -129,53 +129,6 @@ test("action.yml declares migration-dirs and max-file-size with default ''", () 
   assert.equal(parsed.inputs["max-file-size"].default, "");
 });
 
-test("unit test for --summary-json content on a fixture diff", () => {
-  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "action-test-summary-base-"));
-  const tmpHead = fs.mkdtempSync(path.join(os.tmpdir(), "action-test-summary-head-"));
-  const summaryPath = path.join(tmpHead, "summary.json");
-
-  try {
-    fs.writeFileSync(
-      path.join(tmpBase, "schema.prisma"),
-      `datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-model User { id Int @id }
-`
-    );
-
-    fs.writeFileSync(
-      path.join(tmpHead, "schema.prisma"),
-      `datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-model User { id Int @id role String }
-model Post { id Int @id }
-`
-    );
-
-    const diagramCli = path.resolve("tools/diagram.mjs");
-    const proc = spawnSync(
-      process.execPath,
-      [diagramCli, "diff-repo", tmpBase, tmpHead, "--format", "json", "--summary-json", summaryPath],
-      { encoding: "utf8" }
-    );
-
-    assert.equal(proc.status, 0, `diff-repo exited with ${proc.status}: ${proc.stderr}`);
-    assert.ok(fs.existsSync(summaryPath), "summary.json should be created at the requested path");
-
-    const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
-    assert.equal(typeof summary.hasChanges, "boolean");
-    assert.equal(summary.hasChanges, true);
-    assert.equal(typeof summary.truncated, "boolean");
-    assert.equal(summary.truncated, false);
-    assert.ok(Array.isArray(summary.parseErrors));
-    assert.equal(summary.parseErrors.length, 0);
-    assert.equal(typeof summary.counts, "object");
-    assert.ok(summary.counts !== null);
-    assert.ok(summary.counts.modified > 0 || summary.counts.modifiedSources > 0);
-  } finally {
-    fs.rmSync(tmpBase, { recursive: true, force: true });
-    fs.rmSync(tmpHead, { recursive: true, force: true });
-  }
-});
-
 test("action.yml declares mode input with default check and strict-release with default false", () => {
   const actionPath = path.resolve("action.yml");
   const parsed = yaml.parse(fs.readFileSync(actionPath, "utf8"));

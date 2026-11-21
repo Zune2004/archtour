@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 function runCheck(baseFiles, headFiles) {
   const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "precision-base-"));

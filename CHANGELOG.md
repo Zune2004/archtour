@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Leftovers from the diagram toolkit:** the undocumented `diff-repo` command and the old Mermaid, DSL and visual-diff
+  code are gone from the package. The CLI file is now `tools/cli.mjs`; `node tools/diagram.mjs ...` still works.
+
 ### Added
 - **Helm charts are rendered** with `helm template` when helm is installed (it is on GitHub's Linux runners), so a chart
   whose templates or `values.yaml` change is checked like any other manifest (a `privileged: true` set only in

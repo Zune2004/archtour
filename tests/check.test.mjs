@@ -28,7 +28,7 @@ import { RECOMMENDED_RULES } from "../tools/rules-recommended.mjs";
 import { batchCatFile, parseCatFileBatchOutput } from "../tools/changed.mjs";
 import { isHelmTemplate } from "../tools/scan.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 // 1. Schema validation errors
 test("schema validation errors with clear rule id and field name", () => {

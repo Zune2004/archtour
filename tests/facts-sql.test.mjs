@@ -21,7 +21,7 @@ import { discoverFiles } from "../tools/scan.mjs";
 import { evaluateRules, getExitCode, formatMarkdownReport } from "../tools/rules.mjs";
 import { RECOMMENDED_RULES } from "../tools/rules-recommended.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 // 1. Splitter with quotes, comments, $$ bodies, and block-comment whitespace
 test("splitter respects quotes, backticks, comments, and $$ dollar-quoted bodies", () => {

@@ -4,7 +4,7 @@ Archtour is an architecture guardrails CLI and GitHub Action.
 Node ESM, no build.
 
 Entry point:
-- CLI entry: `tools/diagram.mjs`
+- CLI entry: `tools/cli.mjs`
 - Commands: `check`, `audit-history`, `facts`, `changes`, `scan`, `diff-repo`
 
 Structure:

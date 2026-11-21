@@ -8,7 +8,7 @@ import { performance } from "node:perf_hooks";
 
 import { auditHistory, isCandidateSource, isIgnoredPath, parseDiffTreeZ } from "../tools/history.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 function hasGit() {
   try {
@@ -227,7 +227,7 @@ if (!hasGit()) {
       assert.ok(resLimit3.findings.some(f => f.sha === c3), "Scan of 3 commits includes C3 findings");
       assert.equal(resLimit3.findings.some(f => f.sha === c2), false, "Scan of 3 commits excludes C2 findings");
 
-      // 5. Test CLI execution via tools/diagram.mjs audit-history
+      // 5. Test CLI execution via tools/cli.mjs audit-history
       const cliJsonRes = spawnSync(process.execPath, [CLI, "audit-history", tmp, "--json"], { encoding: "utf8" });
       assert.equal(cliJsonRes.status, 0, `CLI audit-history failed: ${cliJsonRes.stderr}`);
       const parsedCliJson = JSON.parse(cliJsonRes.stdout);

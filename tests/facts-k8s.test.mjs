@@ -12,7 +12,7 @@ import { discoverFiles } from "../tools/scan.mjs";
 import { RECOMMENDED_RULES } from "../tools/rules-recommended.mjs";
 import { evaluateRules, getExitCode } from "../tools/rules.mjs";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
 // 1. Multi-document YAML parsing
 test("extractFacts parses multi-document YAML and ignores unknown kinds", () => {

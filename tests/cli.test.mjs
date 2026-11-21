@@ -5,9 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 
-test("tools/diagram.mjs --help runs successfully from a fresh temp directory", () => {
+test("tools/cli.mjs --help runs successfully from a fresh temp directory", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-help-test-"));
   try {
     const res = spawnSync(process.execPath, [CLI, "--help"], {
@@ -27,7 +27,7 @@ test("tools/diagram.mjs --help runs successfully from a fresh temp directory", (
 test("archtour help lists the guardrails commands with check first", () => {
   const r = spawnSync(process.execPath, [CLI, "help"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const order = ["check", "baseline", "audit-history", "diff-repo", "facts", "changes", "scan"];
+  const order = ["check", "baseline", "audit-history", "facts", "changes", "scan"];
   const listed = r.stdout
     .split("\n")
     .filter((line) => /^  \S/.test(line))
@@ -98,145 +98,6 @@ test("CLI scan with repeatable --ignore skips folders and prints skipped (ignore
     const r2 = spawnSync(process.execPath, [CLI, "scan", tmp, "--ignore", "nonexistent-folder", "--json", "-o", outJson], { encoding: "utf8" });
     assert.equal(r2.status, 0);
     assert.equal(r2.stdout.includes("skipped (ignored):"), false);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("CLI diff-repo -o x.md writes markdown with archtour-diff marker and exits 0", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "diag-cli-diff-md-test-"));
-  try {
-    const baseDir = path.join(tmp, "base");
-    const headDir = path.join(tmp, "head");
-    fs.mkdirSync(baseDir, { recursive: true });
-    fs.mkdirSync(headDir, { recursive: true });
-
-    fs.writeFileSync(
-      path.join(baseDir, "compose.yml"),
-      "services:\n  app:\n    image: node:20\n"
-    );
-    fs.writeFileSync(
-      path.join(headDir, "compose.yml"),
-      "services:\n  app:\n    image: node:22\n  redis:\n    image: redis:alpine\n"
-    );
-
-    const outFile = path.join(tmp, "x.md");
-    const r = spawnSync(
-      process.execPath,
-      [CLI, "diff-repo", baseDir, headDir, "-o", outFile],
-      { encoding: "utf8" }
-    );
-
-    assert.equal(r.status, 0, `diff-repo -o x.md failed: ${r.stderr}`);
-    assert.ok(fs.existsSync(outFile));
-    const content = fs.readFileSync(outFile, "utf8");
-    assert.ok(
-      content.includes("<!-- archtour-diff -->"),
-      `Expected markdown to contain <!-- archtour-diff -->, got:\n${content}`
-    );
-    assert.ok(r.stdout.includes(`wrote ${outFile}`));
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("CLI diff-repo -o x.json writes valid planned spec JSON and exits 0", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "diag-cli-diff-json-test-"));
-  try {
-    const baseDir = path.join(tmp, "base");
-    const headDir = path.join(tmp, "head");
-    fs.mkdirSync(baseDir, { recursive: true });
-    fs.mkdirSync(headDir, { recursive: true });
-
-    fs.writeFileSync(
-      path.join(baseDir, "compose.yml"),
-      "services:\n  app:\n    image: node:20\n"
-    );
-    fs.writeFileSync(
-      path.join(headDir, "compose.yml"),
-      "services:\n  app:\n    image: node:22\n  redis:\n    image: redis:alpine\n"
-    );
-
-    const outFile = path.join(tmp, "x.json");
-    const r = spawnSync(
-      process.execPath,
-      [CLI, "diff-repo", baseDir, headDir, "-o", outFile],
-      { encoding: "utf8" }
-    );
-
-    assert.equal(r.status, 0, `diff-repo -o x.json failed: ${r.stderr}`);
-    assert.ok(fs.existsSync(outFile));
-    const parsed = JSON.parse(fs.readFileSync(outFile, "utf8"));
-    assert.ok(parsed.title);
-    assert.ok(Array.isArray(parsed.nodes));
-    assert.ok(r.stdout.includes(`wrote ${outFile}`));
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("CLI diff-repo -o x.txt exits non-zero with unsupported extension message", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "diag-cli-diff-txt-test-"));
-  try {
-    const baseDir = path.join(tmp, "base");
-    const headDir = path.join(tmp, "head");
-    fs.mkdirSync(baseDir, { recursive: true });
-    fs.mkdirSync(headDir, { recursive: true });
-
-    fs.writeFileSync(
-      path.join(baseDir, "compose.yml"),
-      "services:\n  app:\n    image: node:20\n"
-    );
-    fs.writeFileSync(
-      path.join(headDir, "compose.yml"),
-      "services:\n  app:\n    image: node:20\n"
-    );
-
-    const outFile = path.join(tmp, "x.txt");
-    const r = spawnSync(
-      process.execPath,
-      [CLI, "diff-repo", baseDir, headDir, "-o", outFile],
-      { encoding: "utf8" }
-    );
-
-    assert.notEqual(r.status, 0);
-    assert.ok(
-      r.stderr.includes("-o must end in .md or .json (got .txt)"),
-      `Expected stderr to include error message, got:\n${r.stderr}`
-    );
-    assert.equal(fs.existsSync(outFile), false);
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("CLI diff-repo with --format md and -o d.md does not crash or overwrite with JSON", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "diag-cli-bug-test-"));
-  try {
-    const baseDir = path.join(tmp, "base");
-    const headDir = path.join(tmp, "head");
-    fs.mkdirSync(baseDir, { recursive: true });
-    fs.mkdirSync(headDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(baseDir, "compose.yml"),
-      "services:\n  app:\n    image: node:20\n"
-    );
-    fs.writeFileSync(
-      path.join(headDir, "compose.yml"),
-      "services:\n  app:\n    image: node:22\n  redis:\n    image: redis:alpine\n"
-    );
-
-    const outFile = path.join(tmp, "d.md");
-    const r = spawnSync(
-      process.execPath,
-      [CLI, "diff-repo", baseDir, headDir, "--format", "md", "-o", outFile],
-      { encoding: "utf8" }
-    );
-    assert.equal(r.status, 0, `diff-repo --format md -o d.md failed: ${r.stderr}`);
-    assert.ok(fs.existsSync(outFile));
-    const content = fs.readFileSync(outFile, "utf8");
-    assert.ok(content.includes("<!-- archtour-diff -->"));
-    assert.equal(fs.existsSync(path.join(tmp, "d.json")), false);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -343,23 +204,10 @@ paths:
   }
 });
 
-test("CLI refuses out == input for diff-repo and scan and leaves input unchanged", () => {
+test("CLI refuses out == input for scan and leaves input unchanged", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cli-no-overwrite-"));
   try {
     const prismaContent = "model User { id Int @id }\n";
-
-    // 1. diff-repo
-    const dirA = path.join(tmp, "repoA");
-    const dirB = path.join(tmp, "repoB");
-    fs.mkdirSync(dirA);
-    fs.mkdirSync(dirB);
-    const fileA = path.join(dirA, "schema.prisma");
-    fs.writeFileSync(fileA, prismaContent);
-    fs.writeFileSync(path.join(dirB, "schema.prisma"), prismaContent);
-    const rDiffRepo = spawnSync(process.execPath, [CLI, "diff-repo", dirA, dirB, "-o", fileA], { encoding: "utf8" });
-    assert.equal(rDiffRepo.status, 1);
-    assert.ok(rDiffRepo.stderr.includes("output file would overwrite input file"));
-    assert.equal(fs.readFileSync(fileA, "utf8"), prismaContent);
 
     // 2. scan
     const scanDir = path.join(tmp, "scandir");
@@ -385,10 +233,10 @@ test("CLI automatically creates missing output directories", () => {
     fs.writeFileSync(path.join(baseDir, "compose.yml"), "services:\n  app:\n    image: node:20\n");
     fs.writeFileSync(path.join(headDir, "compose.yml"), "services:\n  app:\n    image: node:22\n");
 
-    const nestedOut = path.join(tmp, "a", "b", "c", "out.md");
+    const nestedOut = path.join(tmp, "a", "b", "c", "out.json");
     assert.equal(fs.existsSync(path.dirname(nestedOut)), false);
 
-    const r = spawnSync(process.execPath, [CLI, "diff-repo", baseDir, headDir, "-o", nestedOut], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [CLI, "scan", headDir, "-o", nestedOut], { encoding: "utf8" });
     assert.equal(r.status, 0, `Command failed: ${r.stderr}`);
     assert.ok(fs.existsSync(nestedOut), "Output file should be created in nested directory");
   } finally {

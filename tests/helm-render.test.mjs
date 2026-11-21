@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const CLI = path.resolve("tools/diagram.mjs");
+const CLI = path.resolve("tools/cli.mjs");
 const HELM_OK = spawnSync("helm", ["version", "--short"], { encoding: "utf8" }).status === 0;
 const SKIP_HELM = HELM_OK ? false : "helm not installed";
 
