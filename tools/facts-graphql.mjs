@@ -226,6 +226,60 @@ function isStandardScalarChange(c) {
   return false;
 }
 
+const FORBIDDEN_TYPES = new Set([
+  "Enum", "Field", "Type", "Input", "Interface", "Union", "Scalar", "Directive",
+  "enum", "field", "type", "input", "interface", "union", "scalar", "directive"
+]);
+
+function resolveGraphQLEntity(description, dir, primaryEntities, fallbackEntities) {
+  let entityId = `gql.schema:${dir}`;
+  let source = null;
+
+  const fieldMatch = description.match(/\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b/);
+  if (fieldMatch) {
+    const typeName = fieldMatch[1];
+    const memberName = fieldMatch[2];
+    const fid = `gql.field:${typeName}.${memberName}`;
+    const ent = primaryEntities.get(fid) || fallbackEntities.get(fid);
+    if (ent) {
+      entityId = ent.id;
+      source = ent.source;
+    } else {
+      entityId = fid;
+      const tid = `gql.type:${typeName}`;
+      const typeEnt = primaryEntities.get(tid) || fallbackEntities.get(tid);
+      if (typeEnt) {
+        source = typeEnt.source;
+      }
+    }
+    return { entityId, source };
+  }
+
+  const leadingMatch = description.match(/^(?:Type|Enum|Input(?:\s+object)?(?:\s+type)?|Interface|Union|Scalar|Directive)\s+@?([A-Za-z_][A-Za-z0-9_]*)\b/i);
+  let typeName = null;
+  if (leadingMatch) {
+    typeName = leadingMatch[1];
+  } else {
+    const firstWordMatch = description.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/);
+    if (firstWordMatch) {
+      typeName = firstWordMatch[1];
+    }
+  }
+
+  if (typeName && !FORBIDDEN_TYPES.has(typeName)) {
+    const tid = `gql.type:${typeName}`;
+    const ent = primaryEntities.get(tid) || fallbackEntities.get(tid);
+    if (ent) {
+      entityId = ent.id;
+      source = ent.source;
+    } else {
+      entityId = tid;
+    }
+  }
+
+  return { entityId, source };
+}
+
 /**
  * Computes GraphQL schema diffs between base and head.
  * Emits `gql.breaking` and `gql.dangerous` changes from graphql-js.
@@ -244,32 +298,7 @@ function emitGraphQLEvents(baseSchema, headSchema, dir, events, baseEntities, he
   const filteredDangerous = dangerous.filter(c => !isStandardScalarChange(c));
 
   for (const c of filteredBreaking) {
-    let entityId = `gql.schema:${dir}`;
-    let source = null;
-
-    const fieldMatch = c.description.match(/^([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\b/);
-    if (fieldMatch) {
-      const fid = `gql.field:${fieldMatch[1]}.${fieldMatch[2]}`;
-      const ent = baseEntities.get(fid) || headEntities.get(fid);
-      if (ent) {
-        entityId = ent.id;
-        source = ent.source;
-      } else {
-        entityId = fid;
-      }
-    } else {
-      const typeMatch = c.description.match(/^([A-Za-z0-9_]+)\b/);
-      if (typeMatch) {
-        const tid = `gql.type:${typeMatch[1]}`;
-        const ent = baseEntities.get(tid) || headEntities.get(tid);
-        if (ent) {
-          entityId = ent.id;
-          source = ent.source;
-        } else {
-          entityId = tid;
-        }
-      }
-    }
+    const { entityId, source } = resolveGraphQLEntity(c.description, dir, baseEntities, headEntities);
 
     events.push({
       type: "gql.breaking",
@@ -282,32 +311,7 @@ function emitGraphQLEvents(baseSchema, headSchema, dir, events, baseEntities, he
   }
 
   for (const c of filteredDangerous) {
-    let entityId = `gql.schema:${dir}`;
-    let source = null;
-
-    const fieldMatch = c.description.match(/^([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\b/);
-    if (fieldMatch) {
-      const fid = `gql.field:${fieldMatch[1]}.${fieldMatch[2]}`;
-      const ent = headEntities.get(fid) || baseEntities.get(fid);
-      if (ent) {
-        entityId = ent.id;
-        source = ent.source;
-      } else {
-        entityId = fid;
-      }
-    } else {
-      const typeMatch = c.description.match(/^([A-Za-z0-9_]+)\b/);
-      if (typeMatch) {
-        const tid = `gql.type:${typeMatch[1]}`;
-        const ent = headEntities.get(tid) || baseEntities.get(tid);
-        if (ent) {
-          entityId = ent.id;
-          source = ent.source;
-        } else {
-          entityId = tid;
-        }
-      }
-    }
+    const { entityId, source } = resolveGraphQLEntity(c.description, dir, headEntities, baseEntities);
 
     events.push({
       type: "gql.dangerous",
