@@ -22,9 +22,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chart's `ci/*-values.yaml` (the chart-testing convention), and are always read from the base branch, so a PR cannot
   pick the values it is checked with. Local `file://` dependencies are copied from the repo; remote ones that are not
   vendored in `charts/` are left out (nothing is ever downloaded) with one advisory notice per chart. A change to
-  `helm.yml` is reported as a policy change.
+  `helm.yml` is reported as a policy change (also when only a subfolder is checked), and a PR that changes one of the
+  values files the chart is rendered with gets `changed-file-not-checked` for it (the new values are used from the next PR after the merge).
+  `helm.yml` cannot list the chart's own `values.yaml` (it is always read from each side), and a chart key that matches
+  no touched chart prints a notice.
+- **Irreversible SQL:** `DROP SCHEMA` and `DROP DATABASE` are hard blocks (`sql-no-drop-schema`,
+  `sql-no-drop-database`); `TRUNCATE` and a `DELETE FROM` without `WHERE` are soft blocks (`sql-no-truncate`,
+  `sql-no-delete-all`). Before, they passed with no finding. A `TRUNCATE` or `DROP SCHEMA` of a table or schema created
+  in the same migration file (not with `IF NOT EXISTS`, matched by its schema-qualified name) is not reported.
 
 ### Fixed
+- **Override owners:** an override clears a merged finding only when the overrider owns every rule on it (its own
+  rule and each rule under "Also matched"). Before, with `sql-no-drop-column` owned by one person, anyone with write
+  access could clear a dropped column by overriding the other rule on the same finding, in either direction
+  (introduced by the merging of Prisma and SQL findings in this release; 0.3.0 was not affected).
+- **Helm charts that were not rendered** (helm missing, `--render-helm off`, or a failed render): a changed
+  `values.yaml`, `Chart.yaml` or other chart file outside `templates/` is now reported as `changed-file-not-checked`
+  instead of passing silently.
+- **GraphQL:** each breaking change is its own finding, with its file and line: removed fields and enum values
+  (`gql.field:Color.BLUE`), arguments (`gql.arg:Query.users.limit`), interfaces (`gql.implements:User.Node`) and union
+  members (`gql.union:Search.Post`). Before, changes of one kind were merged into one finding (`gql.type:Enum`,
+  `File: unknown`), and an exception for one of them silenced the others. An exception written for `gql.type:Enum` or `gql.type:Field` no longer matches:
+  point it at the field (`gql.field:<Type>.<name>`).
 - **`audit-history` now gives the same result as `check`** for each past commit: it replays the migrations folder,
   multi-file Prisma schemas and GraphQL folders, and uses the policy of the commit's parent, like the gate. Before, it
   read only each commit's changed files and could report far fewer findings (one real commit: 27 vs 191). A commit

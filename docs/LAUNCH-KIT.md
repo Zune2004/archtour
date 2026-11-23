@@ -150,5 +150,5 @@ It runs completely offline in CI and is 100% MIT open-source. Try `npx archtour 
 | PR override resolution via label and `/archtour override` | `tools/override.mjs`, `tests/action.test.mjs` | yes (verified in tests) |
 | GitHub Action CI/CD gate with default `mode: check` | `action.yml` | yes (verified in tests/action.test.mjs) |
 | Public repository visibility on GitHub | GitHub repo settings | yes (public since 2026-11-16) |
-| Published npm package | `npm view archtour` | [NEEDS: npm publish] |
+| Published npm package | `npm view archtour` | yes (0.3.0 on npm since 2026-11-20) |
 | Automated test suite passing | `npm test` | yes (verified) |
