@@ -947,7 +947,8 @@ async function prepareChartDependencies(tmpChartDir, { rootDir, ref, chartDir, u
 
 async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, headFiles, opts, display, helmNotices }) {
   const charts = await findTouchedCharts(rootDir, mergeBase, changedPaths, opts);
-  if (charts.length === 0) return;
+  if (charts.length === 0) return [];
+  const outcomes = [];
 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-helm-"));
   try {
@@ -976,6 +977,7 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
         const reason = `Helm values file ${values.missing} not found in the base branch`;
         markChartTemplatesSkipped(baseFiles, chartDisplay, reason);
         markChartTemplatesSkipped(headFiles, chartDisplay, reason);
+        outcomes.push({ dir: chartDir, chartDisplay, ok: false, why: reason });
         continue;
       }
 
@@ -997,6 +999,7 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
         removeChartTemplates(headFiles, chartDisplay);
         if (baseRender && baseRender.ok) addRenderedDocs(baseFiles, chartDisplay, baseRender.docs, rootDir);
         if (headRender && headRender.ok) addRenderedDocs(headFiles, chartDisplay, headRender.docs, rootDir);
+        outcomes.push({ dir: chartDir, chartDisplay, ok: true, why: null });
         const remoteDeps = headExists ? headRemote : baseRemote;
         if (remoteDeps.length > 0) {
           const list = remoteDeps.map(d => `${d.name} (${d.repository})`).join(", ");
@@ -1008,6 +1011,7 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
         const reason = `Helm template: helm template failed (${failed ? failed.error : "unknown error"}); render it in CI and scan the output`;
         markChartTemplatesSkipped(baseFiles, chartDisplay, reason);
         markChartTemplatesSkipped(headFiles, chartDisplay, reason);
+        outcomes.push({ dir: chartDir, chartDisplay, ok: false, why: reason });
       }
     }
   } finally {
@@ -1015,6 +1019,7 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     } catch {}
   }
+  return outcomes;
 }
 
 /**
@@ -1131,8 +1136,9 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
 
   // Render every touched Helm chart and replace its raw templates with the rendered manifests.
   const helmNotices = [];
+  let chartOutcomes = null;
   if (opts.renderHelm === "on") {
-    await renderHelmCharts({ rootDir, mergeBase, changedPaths: allChanged, baseFiles, headFiles, opts, display, helmNotices });
+    chartOutcomes = await renderHelmCharts({ rootDir, mergeBase, changedPaths: allChanged, baseFiles, headFiles, opts, display, helmNotices });
   }
 
   // Build addedCharts: Chart.yaml/Chart.yml files added by the change. Look at every changed file, not only the scanned
@@ -1164,6 +1170,56 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
   const baseFacts = await extractFactsWithCache(baseFiles, cache, { rootDir, addedCharts });
   const headFacts = await extractFactsWithCache(headFiles, cache, { rootDir, addedCharts });
   if (helmNotices.length > 0) headFacts._helmDependencyNotices = helmNotices;
+
+  // T-119: a touched chart that was not rendered successfully (render off, a failed render,
+  // or a missing values file) leaves its non-template chart files unchecked. Report each
+  // changed file inside the chart folder (outside templates/) ending in .yaml/.yml/.tpl/.tgz
+  // as skipped so the check never passes silently when it did not look.
+  const notRendered = [];
+  if (opts.renderHelm === "off") {
+    const charts = await findTouchedCharts(rootDir, mergeBase, allChanged, opts);
+    for (const chart of charts) {
+      notRendered.push({ dir: chart.dir, chartDisplay: display(chart.dir), why: "helm not found or --render-helm off" });
+    }
+  } else if (chartOutcomes) {
+    for (const o of chartOutcomes) {
+      if (!o.ok) notRendered.push({ dir: o.dir, chartDisplay: o.chartDisplay, why: o.why });
+    }
+  }
+
+  if (notRendered.length > 0) {
+    const chartExtensions = /\.(?:ya?ml|tpl|tgz)$/i;
+    const flaggedCharts = new Set();
+    for (const s of Array.isArray(headFacts?.skipped) ? headFacts.skipped : []) {
+      const sp = String(s.path || "");
+      if (!sp) continue;
+      for (const nr of notRendered) {
+        if (flaggedCharts.has(nr.chartDisplay)) continue;
+        const prefix = nr.chartDisplay ? `${nr.chartDisplay}/` : "";
+        if (sp === nr.chartDisplay || sp.startsWith(prefix)) {
+          flaggedCharts.add(nr.chartDisplay);
+        }
+      }
+    }
+
+    for (const p of rawChanged) {
+      const displayP = display(p);
+      const hit = notRendered.find(nr => {
+        const prefix = nr.chartDisplay ? `${nr.chartDisplay}/` : "";
+        return displayP === nr.chartDisplay || displayP.startsWith(prefix);
+      });
+      if (!hit) continue;
+      if (flaggedCharts.has(hit.chartDisplay)) continue;
+      const templatePrefix = hit.chartDisplay ? `${hit.chartDisplay}/templates/` : "templates/";
+      if (displayP.startsWith(templatePrefix)) continue;
+      if (!chartExtensions.test(path.basename(displayP))) continue;
+      if (!headFacts.skipped) headFacts.skipped = [];
+      headFacts.skipped.push({
+        path: displayP,
+        reason: `Helm chart ${hit.chartDisplay} was not rendered (${hit.why}); a change to ${path.basename(displayP)} can change every manifest`
+      });
+    }
+  }
 
   // Add folder skip notices: files in rawChanged that are not candidates but whose basename is a candidate
   // and are excluded only by default skipped folders (not user --ignore)
