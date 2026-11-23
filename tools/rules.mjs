@@ -804,14 +804,28 @@ export function applyOverrides(findings = [], rules = [], opts = {}) {
 
     // Apply override
     for (const f of softFindings) {
-      // A soft finding is cleared only when the overrider is also an owner of the finding's OWN rule.
-      // The overridden rule (e.g. a generic pack rule with empty owners) must not clear a finding whose own rule
-      // (e.g. sql-no-drop-column) the overrider does not own. Owners for the finding's own rule come from the
-      // rule list, else from the finding itself.
-      const ownRule = rules.find(r => r.id === f.ruleId);
-      const ownOwners = ownRule?.owners !== undefined ? ownRule.owners : (f.owners || []);
-      if (!isOwnerMatch(ownOwners, overrideBy, ownerTeams, overridePermission, prAuthor)) {
-        console.error(`archtour: override of rule "${ruleId}" refused for ${f.event?.entityId}: "${overrideBy}" is not an owner of "${f.ruleId}"`);
+      // A soft finding is cleared only when the overrider passes isOwnerMatch for EVERY rule in
+      // [f.ruleId, ...(f.alsoMatched || [])] (owners from rules.find(r => r.id === id)?.owners, for f.ruleId
+      // falling back to f.owners) and for the overridden rule.
+      const allRules = [f.ruleId, ...(f.alsoMatched || [])];
+      let unownedRule = null;
+      for (const id of allRules) {
+        const rObj = rules.find(r => r.id === id);
+        const rOwners = rObj?.owners !== undefined ? rObj.owners : (id === f.ruleId ? (f.owners || []) : []);
+        const ownerList = Array.isArray(rOwners) ? rOwners : (rOwners ? [rOwners] : []);
+        // An ownerless rule means "anyone with write access". Without a known permission (a local CLI run without
+        // --override-permission) it adds no constraint; the Action always passes the verified permission, because an
+        // override comment only becomes active after the write-access check (override.mjs resolveOverride).
+        if (ownerList.length === 0 && !overridePermission) {
+          continue;
+        }
+        if (!isOwnerMatch(ownerList, overrideBy, ownerTeams, overridePermission, prAuthor)) {
+          unownedRule = id;
+          break;
+        }
+      }
+      if (unownedRule) {
+        console.error(`archtour: override of rule "${ruleId}" refused for ${f.event?.entityId}: "${overrideBy}" is not an owner of "${unownedRule}"`);
         continue;
       }
 

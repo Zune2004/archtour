@@ -541,6 +541,7 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
   const statements = splitSqlStatements(cleanedContent);
   const createdInThisFile = new Set();
   const tempTablesInThisFile = new Set();
+  const createdSchemasInThisFile = new Set();
   const views = viewsByEntities.get(entities) || new Set();
   viewsByEntities.set(entities, views);
   const fileEvents = [];
@@ -606,6 +607,16 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
     const viewMatch = text.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)/i);
     if (viewMatch) {
       views.add(cleanIdentifier(viewMatch[1]).toLowerCase());
+      continue;
+    }
+
+    // CREATE SCHEMA
+    const createSchemaMatch = text.match(/^\s*CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:([^\s;(]+)(?:\s+AUTHORIZATION\s+[^\s;(]+)?|AUTHORIZATION\s+([^\s;(]+))/i);
+    if (createSchemaMatch) {
+      const sName = cleanIdentifier(createSchemaMatch[1] || createSchemaMatch[2]);
+      if (sName) {
+        createdSchemasInThisFile.add(sName.toLowerCase());
+      }
       continue;
     }
 
@@ -759,14 +770,16 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
       for (const rs of rawSchemas) {
         const sName = cleanIdentifier(rs);
         if (!sName) continue;
-        fileEvents.push({
-          type: "sql.drop_schema",
-          entityId: `db.schema:${sName}`,
-          kind: "db.schema",
-          before: sName,
-          source: { file: filePath, line },
-          message: `Schema '${sName}' was dropped`
-        });
+        if (!createdSchemasInThisFile.has(sName.toLowerCase())) {
+          fileEvents.push({
+            type: "sql.drop_schema",
+            entityId: `db.schema:${sName}`,
+            kind: "db.schema",
+            before: sName,
+            source: { file: filePath, line },
+            message: `Schema '${sName}' was dropped`
+          });
+        }
       }
       continue;
     }
@@ -795,14 +808,17 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
       for (const rt of rawTables) {
         const tName = cleanIdentifier(rt);
         if (!tName) continue;
-        fileEvents.push({
-          type: "sql.truncate",
-          entityId: `db.table:${tName}`,
-          kind: "db.table",
-          before: tName,
-          source: { file: filePath, line },
-          message: `Table '${tName}' was truncated (all rows deleted)`
-        });
+        const tLower = tName.toLowerCase();
+        if (!createdInThisFile.has(tLower) && !tempTablesInThisFile.has(tLower)) {
+          fileEvents.push({
+            type: "sql.truncate",
+            entityId: `db.table:${tName}`,
+            kind: "db.table",
+            before: tName,
+            source: { file: filePath, line },
+            message: `Table '${tName}' was truncated (all rows deleted)`
+          });
+        }
       }
       continue;
     }
