@@ -12,10 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code are gone from the package. The CLI file is now `tools/cli.mjs`; `node tools/diagram.mjs ...` still works.
 
 ### Added
-- **Helm charts are rendered** with `helm template` when helm is installed (it is on GitHub's Linux runners), so a chart
-  whose templates or `values.yaml` change is checked like any other manifest (a `privileged: true` set only in
-  `values.yaml` is now caught). `--render-helm auto|on|off` (default `auto`), `--helm-bin`, Action input `render-helm`.
-  A chart that cannot be rendered (required values, dependencies not vendored in `charts/`) still blocks with
+- **Helm charts are rendered** with `helm template` when helm is installed (it is on GitHub's Linux runners). When a
+  chart renders, its output is checked like any other manifest (a `privileged: true` set only in `values.yaml` is now
+  caught). Rendering every touched chart on both sides takes time: `audit-history` on a Helm-heavy repo is slower than
+  in 0.3.0 (`--render-helm off` skips it). `--render-helm auto|on|off` (default `auto`), `--helm-bin`, Action input
+  `render-helm`. A chart that cannot be rendered (for example a required value and no values file) still blocks with
   `changed-file-not-checked`, and the reason now quotes helm's error.
 - **Real-world charts render:** values come from an optional `.archtour/helm.yml` (`set` and `values` per chart) or the
   chart's `ci/*-values.yaml` (the chart-testing convention), and are always read from the base branch, so a PR cannot
@@ -26,9 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **`audit-history` now gives the same result as `check`** for each past commit: it replays the migrations folder,
   multi-file Prisma schemas and GraphQL folders, and uses the policy of the commit's parent, like the gate. Before, it
-  read only each commit's changed files and could report far fewer findings (one real commit: 27 vs 191). It is also
-  faster (umami, 399 commits: 64 s -> 26 s). A commit that cannot be evaluated is now reported with its error instead
-  of looking like "nothing found".
+  read only each commit's changed files and could report far fewer findings (one real commit: 27 vs 191). A commit
+  that cannot be evaluated is now reported with its error instead of looking like "nothing found".
 - **Line endings:** a commit that only changes LF to CRLF (Windows checkouts with `core.autocrlf`) no longer looks like
   a schema change.
 - **ClickHouse projections:** `ADD` / `DROP` / `MATERIALIZE` / `CLEAR PROJECTION` are no longer read as a column (a

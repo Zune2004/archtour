@@ -19,7 +19,7 @@ I built **Archtour**: **The review step for changes you can't undo.**
 Description: Blocks risky pull requests: dropped columns, breaking API changes, privileged containers, public ports, deleted databases. Open source, runs in your CI.
 
 - GitHub: https://github.com/Zune2004/archtour
-- npm: `npx archtour check --changed-from origin/main .` [NEEDS: npm publish]
+- npm: `npx archtour check --changed-from origin/main .` (https://www.npmjs.com/package/archtour)
 
 ### 3 Concrete Blocked Changes:
 1. **SQL Migrations & Prisma:** Blocks `DROP COLUMN` or `DROP TABLE` without migration review, unsafe `NOT NULL` without `DEFAULT` on populated tables, and index creation on PostgreSQL without `CONCURRENTLY` (which locks writes). Also flags hard failures if an already-applied migration file was edited in the PR.

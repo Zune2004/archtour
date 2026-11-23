@@ -5,7 +5,7 @@ Node ESM, no build.
 
 Entry point:
 - CLI entry: `tools/cli.mjs`
-- Commands: `check`, `audit-history`, `facts`, `changes`, `scan`, `diff-repo`
+- Commands: `check`, `baseline`, `audit-history`, `facts`, `changes`, `scan`
 
 Structure:
 - `tools/`: CLI and guardrails implementation

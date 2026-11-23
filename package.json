@@ -21,7 +21,12 @@
     "openapi",
     "architecture",
     "docker-compose",
-    "offline"
+    "offline",
+    "database",
+    "postgres",
+    "migration-safety",
+    "pull-request",
+    "change-management"
   ],
   "dependencies": {
     "graphql": "^17.1.0",
