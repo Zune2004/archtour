@@ -104,6 +104,10 @@ The built-in `archtour:recommended` pack provides day-one value across Docker Co
 | `api-new-route-public` | `api.route_public` | `warn` | `true` | New API route was defined without security (public route). |
 | `service-dependency-added` | `service.dependency_added` | `advisory` | `true` | New service dependency added. |
 | `sql-no-drop-table` | `sql.drop_table` | `soft` | `true` | Dropping a database table is destructive and breaks running services. |
+| `sql-no-drop-schema` | `sql.drop_schema` | `hard` | `false` | Dropping a database schema is destructive and breaks running services. |
+| `sql-no-drop-database` | `sql.drop_database` | `hard` | `false` | Dropping a database is destructive and causes permanent data loss. |
+| `sql-no-truncate` | `sql.truncate` | `soft` | `true` | Truncating a database table is destructive and deletes all rows. |
+| `sql-no-delete-all` | `sql.delete_all` | `soft` | `true` | Deleting all rows from a table without a WHERE clause is destructive. |
 | `sql-no-drop-column` | `sql.drop_column` | `soft` | `true` | Dropping a database column is destructive and breaks running queries. |
 | `sql-type-narrowed` | `sql.type_narrowed` | `warn` | `true` | Narrowing a column type risks data truncation or migration failures. |
 | `sql-not-null-without-default` | `sql.not_null_without_default` | `warn` | `true` | Adding or setting a NOT NULL column without a DEFAULT will fail on non-empty tables. |

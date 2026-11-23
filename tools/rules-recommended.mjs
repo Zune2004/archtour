@@ -451,7 +451,7 @@ export const PARSE_ERROR_RULES = [
   }
 ];
 
-export { TERRAFORM_RULES };
+export { TERRAFORM_RULES, SQL_RECOMMENDED_RULES };
 
 // The built-in pack: core rules first, then one block per supported format.
 export const RECOMMENDED_RULES = [

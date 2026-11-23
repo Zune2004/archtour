@@ -752,6 +752,81 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
       continue;
     }
 
+    // DROP SCHEMA
+    const dropSchemaMatch = text.match(/^\s*DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?([\s\S]+?)(?:\s+(?:CASCADE|RESTRICT))?\s*$/i);
+    if (dropSchemaMatch) {
+      const rawSchemas = dropSchemaMatch[1].split(",");
+      for (const rs of rawSchemas) {
+        const sName = cleanIdentifier(rs);
+        if (!sName) continue;
+        fileEvents.push({
+          type: "sql.drop_schema",
+          entityId: `db.schema:${sName}`,
+          kind: "db.schema",
+          before: sName,
+          source: { file: filePath, line },
+          message: `Schema '${sName}' was dropped`
+        });
+      }
+      continue;
+    }
+
+    // DROP DATABASE
+    const dropDbMatch = text.match(/^\s*DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?([\s\S]+?)\s*$/i);
+    if (dropDbMatch) {
+      const dbName = cleanIdentifier(dropDbMatch[1]);
+      if (dbName) {
+        fileEvents.push({
+          type: "sql.drop_database",
+          entityId: `db.database:${dbName}`,
+          kind: "db.database",
+          before: dbName,
+          source: { file: filePath, line },
+          message: `Database '${dbName}' was dropped`
+        });
+      }
+      continue;
+    }
+
+    // TRUNCATE
+    const truncateMatch = text.match(/^\s*TRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?([\s\S]+?)(?:\s+(?:RESTART|CONTINUE)\s+IDENTITY)?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i);
+    if (truncateMatch) {
+      const rawTables = truncateMatch[1].split(",");
+      for (const rt of rawTables) {
+        const tName = cleanIdentifier(rt);
+        if (!tName) continue;
+        fileEvents.push({
+          type: "sql.truncate",
+          entityId: `db.table:${tName}`,
+          kind: "db.table",
+          before: tName,
+          source: { file: filePath, line },
+          message: `Table '${tName}' was truncated (all rows deleted)`
+        });
+      }
+      continue;
+    }
+
+    // DELETE FROM without WHERE
+    const deleteAllMatch = text.match(/^\s*DELETE\s+FROM\s+(?:ONLY\s+)?("[^"]+"|`[^`]+`|[^\s;(]+)/i);
+    if (deleteAllMatch) {
+      if (!/\bWHERE\b/i.test(text)) {
+        const rawTableName = deleteAllMatch[1];
+        const tableName = cleanIdentifier(rawTableName);
+        if (tableName) {
+          fileEvents.push({
+            type: "sql.delete_all",
+            entityId: `db.table:${tableName}`,
+            kind: "db.table",
+            before: tableName,
+            source: { file: filePath, line },
+            message: `All rows of table '${tableName}' are deleted (DELETE without WHERE)`
+          });
+        }
+      }
+      continue;
+    }
+
     // 3. ALTER TABLE
     const alterTableMatch = text.match(/^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?([^\s,(]+)\s+([\s\S]+)$/i);
     if (alterTableMatch) {
@@ -1451,6 +1526,42 @@ export function diffSqlFacts(base = {}, head = {}, events = [], isTruncated = fa
  * Recommended guardrail rules for SQL migrations.
  */
 export const SQL_RECOMMENDED_RULES = [
+  {
+    id: "sql-no-drop-schema",
+    on: "sql.drop_schema",
+    level: "hard",
+    adjustable: false,
+    owners: [],
+    message: "Dropping a database schema is destructive and breaks running services.",
+    docs: "https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#3-built-in-pack-archtourrecommended"
+  },
+  {
+    id: "sql-no-drop-database",
+    on: "sql.drop_database",
+    level: "hard",
+    adjustable: false,
+    owners: [],
+    message: "Dropping a database is destructive and causes permanent data loss.",
+    docs: "https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#3-built-in-pack-archtourrecommended"
+  },
+  {
+    id: "sql-no-truncate",
+    on: "sql.truncate",
+    level: "soft",
+    adjustable: true,
+    owners: [],
+    message: "Truncating a database table is destructive and deletes all rows.",
+    docs: "https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#3-built-in-pack-archtourrecommended"
+  },
+  {
+    id: "sql-no-delete-all",
+    on: "sql.delete_all",
+    level: "soft",
+    adjustable: true,
+    owners: [],
+    message: "Deleting all rows from a table without a WHERE clause is destructive.",
+    docs: "https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#3-built-in-pack-archtourrecommended"
+  },
   {
     id: "sql-no-drop-table",
     on: "sql.drop_table",
