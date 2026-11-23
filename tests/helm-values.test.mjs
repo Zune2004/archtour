@@ -230,7 +230,10 @@ test("d2. a PR cannot hide a head value by editing the ci values file it is chec
     const run = runCheck(dir, baseRef);
     assert.equal(run.status, 1, run.stderr || run.stdout);
     assert.equal(findingById(run.json, "no-k8s-privileged-containers").length, 1, run.stdout);
-    assert.equal(findingById(run.json, "changed-file-not-checked").length, 0);
+    // T-121: the PR's own edit of the values file the chart is rendered with is reported, not silently ignored.
+    const notChecked = findingById(run.json, "changed-file-not-checked");
+    assert.equal(notChecked.length, 1, run.stdout);
+    assert.match(JSON.stringify(notChecked[0]), /ci\/default-values\.yaml/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

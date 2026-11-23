@@ -842,7 +842,7 @@ async function resolveChartValues(rootDir, mergeBase, chart, chartDisplay, opts,
 
   if (!relativeFiles) {
     // A chart that is new in the PR has no base side, hence no ci/ fallback.
-    if (!chart.atBase) return { valuesFiles: [], set };
+    if (!chart.atBase) return { valuesFiles: [], set, used: [] };
     const prefix = chart.dir ? `${chart.dir}/` : "";
     const ciDir = chart.dir ? `${chart.dir}/ci` : "ci";
     const baseFiles = await listFilesAtRef(rootDir, mergeBase, ciDir);
@@ -855,6 +855,7 @@ async function resolveChartValues(rootDir, mergeBase, chart, chartDisplay, opts,
   }
 
   const valuesFiles = [];
+  const used = [];
   for (let i = 0; i < relativeFiles.length; i++) {
     const relative = relativeFiles[i];
     const repoPath = chart.dir ? `${chart.dir}/${relative}` : relative;
@@ -865,8 +866,9 @@ async function resolveChartValues(rootDir, mergeBase, chart, chartDisplay, opts,
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, content);
     valuesFiles.push(dest);
+    used.push(repoPath);
   }
-  return { valuesFiles, set };
+  return { valuesFiles, set, used };
 }
 
 // A path relative to the chart folder, resolved inside the repo; null when it escapes.
@@ -999,7 +1001,15 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
         removeChartTemplates(headFiles, chartDisplay);
         if (baseRender && baseRender.ok) addRenderedDocs(baseFiles, chartDisplay, baseRender.docs, rootDir);
         if (headRender && headRender.ok) addRenderedDocs(headFiles, chartDisplay, headRender.docs, rootDir);
-        outcomes.push({ dir: chartDir, chartDisplay, ok: true, why: null });
+        outcomes.push({
+          dir: chartDir,
+          chartDisplay,
+          ok: true,
+          why: null,
+          // The override values files the chart was rendered with, read from the base branch (T-121). Empty for a
+          // chart that only exists at the head: its values are the PR's own files, not base ones.
+          valuesFiles: chart.atBase ? (values.used || []) : []
+        });
         const remoteDeps = headExists ? headRemote : baseRemote;
         if (remoteDeps.length > 0) {
           const list = remoteDeps.map(d => `${d.name} (${d.repository})`).join(", ");
@@ -1218,6 +1228,28 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
         path: displayP,
         reason: `Helm chart ${hit.chartDisplay} was not rendered (${hit.why}); a change to ${path.basename(displayP)} can change every manifest`
       });
+    }
+  }
+
+  // T-121: a chart is rendered with override values files that are always read from the base branch (the
+  // helm.yml `values` list, else the first ci/*-values.yaml). When the PR itself changes one of those files,
+  // the change was not rendered and not reported: say so instead of passing silently. The chart's own
+  // values.yaml is not in that list unless helm.yml names it (then the base copy overrides the PR's edits too).
+  if (chartOutcomes) {
+    const changedShown = new Set(rawChanged.map(p => display(p)));
+    const flaggedValues = new Set();
+    for (const o of chartOutcomes) {
+      if (!o.ok) continue;
+      for (const repoPath of o.valuesFiles || []) {
+        const shown = display(repoPath);
+        if (!changedShown.has(shown) || flaggedValues.has(shown)) continue;
+        flaggedValues.add(shown);
+        if (!headFacts.skipped) headFacts.skipped = [];
+        headFacts.skipped.push({
+          path: shown,
+          reason: `Helm values file ${shown} of chart ${o.chartDisplay} is read from the base branch; the change in this PR takes effect after merge and was not checked`
+        });
+      }
     }
   }
 
