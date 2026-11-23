@@ -804,6 +804,17 @@ export function applyOverrides(findings = [], rules = [], opts = {}) {
 
     // Apply override
     for (const f of softFindings) {
+      // A soft finding is cleared only when the overrider is also an owner of the finding's OWN rule.
+      // The overridden rule (e.g. a generic pack rule with empty owners) must not clear a finding whose own rule
+      // (e.g. sql-no-drop-column) the overrider does not own. Owners for the finding's own rule come from the
+      // rule list, else from the finding itself.
+      const ownRule = rules.find(r => r.id === f.ruleId);
+      const ownOwners = ownRule?.owners !== undefined ? ownRule.owners : (f.owners || []);
+      if (!isOwnerMatch(ownOwners, overrideBy, ownerTeams, overridePermission, prAuthor)) {
+        console.error(`archtour: override of rule "${ruleId}" refused for ${f.event?.entityId}: "${overrideBy}" is not an owner of "${f.ruleId}"`);
+        continue;
+      }
+
       f.overridden = true;
       f.overriddenBy = overrideBy;
       f.overrideReason = overrideReason;
