@@ -144,6 +144,11 @@ export function loadHelmConfig(policyDir) {
       if (!isSafeChartRelativePath(valueFile)) {
         throw helmConfigError(`values file "${valueFile}" for chart "${chartDir}" must be relative to the chart folder and stay inside it`);
       }
+      // Normalize ./values.yaml to values.yaml for comparison
+      const normalized = valueFile.replace(/^\.\//, "");
+      if (normalized === "values.yaml" || normalized === "values.yml") {
+        throw helmConfigError(`values file "${normalized}" for chart "${chartDir}": the chart's own values.yaml is always read from each side; list only override files`);
+      }
     }
     const set = entry.set == null ? {} : entry.set;
     if (!isPlainObject(set)) throw helmConfigError(`"set" for chart "${chartDir}" must be a mapping`);

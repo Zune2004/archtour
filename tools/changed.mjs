@@ -952,6 +952,16 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
   if (charts.length === 0) return [];
   const outcomes = [];
 
+  // Check for helm.yml chart keys that don't match any found chart folder
+  const helmConfigCharts = opts.helmConfig && opts.helmConfig.charts ? Object.keys(opts.helmConfig.charts) : [];
+  // helm.yml keys may be written relative to the scanned folder or to the repo root (chartHelmEntry accepts both).
+  const foundChartDirs = new Set(charts.flatMap(c => [c.dir, display(c.dir)]));
+  for (const key of helmConfigCharts) {
+    if (!foundChartDirs.has(key)) {
+      console.error(`notice: .archtour/helm.yml: chart "${key}" was not found (keys are chart folders relative to the scanned folder)`);
+    }
+  }
+
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-helm-"));
   try {
     let index = 0;
@@ -1013,7 +1023,7 @@ async function renderHelmCharts({ rootDir, mergeBase, changedPaths, baseFiles, h
         const remoteDeps = headExists ? headRemote : baseRemote;
         if (remoteDeps.length > 0) {
           const list = remoteDeps.map(d => `${d.name} (${d.repository})`).join(", ");
-          const message = `Helm chart ${chartDisplay}: dependencies not vendored, rendered without them: ${list}; vendor them in charts/ to check them`;
+          const message = `Helm chart ${chartDisplay || "."}: dependencies not vendored, rendered without them: ${list}; vendor them in charts/ to check them`;
           helmNotices.push({ chart: chartDisplay, message });
         }
       } else {
@@ -1226,7 +1236,7 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
       if (!headFacts.skipped) headFacts.skipped = [];
       headFacts.skipped.push({
         path: displayP,
-        reason: `Helm chart ${hit.chartDisplay} was not rendered (${hit.why}); a change to ${path.basename(displayP)} can change every manifest`
+        reason: `Helm chart ${hit.chartDisplay || "."} was not rendered (${hit.why}); a change to ${path.basename(displayP)} can change every manifest`
       });
     }
   }
@@ -1247,7 +1257,7 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
         if (!headFacts.skipped) headFacts.skipped = [];
         headFacts.skipped.push({
           path: shown,
-          reason: `Helm values file ${shown} of chart ${o.chartDisplay} is read from the base branch; the change in this PR takes effect after merge and was not checked`
+          reason: `Helm values file ${shown} of chart ${o.chartDisplay || "."} is read from the base branch; the change in this PR takes effect after merge and was not checked`
         });
       }
     }

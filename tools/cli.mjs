@@ -672,7 +672,18 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
 
   // Policy diff (PR changes to .archtour/ files)
   let policyChanges = [];
-  const headPolicyDir = isChangedMode && inGit ? targetDir : headDir;
+  let headPolicyDir = headDir;
+  let headPolicyCleanup = () => {};
+  if (isChangedMode && inGit) {
+    try {
+      const res = await resolveBasePolicy(targetDir, null, "head");
+      headPolicyDir = res.policyDir;
+      headPolicyCleanup = res.cleanup;
+    } catch (err) {
+      policyCleanup();
+      die(`--changed-from: ${err.message}`, 3);
+    }
+  }
   if (!isStateMode && policyFrom !== "head" && headPolicyDir) {
     if (isBootstrap) {
       const headArchtour = path.join(headPolicyDir, ".archtour");
@@ -898,6 +909,7 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   }
 
   policyCleanup();
+  headPolicyCleanup();
   process.exit(exitCode);
 }
 
