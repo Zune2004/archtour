@@ -231,9 +231,66 @@ const FORBIDDEN_TYPES = new Set([
   "enum", "field", "type", "input", "interface", "union", "scalar", "directive"
 ]);
 
+const PREDICATE_WORDS = new Set([
+  "was", "is", "changed", "has", "no", "added", "defaultvalue"
+]);
+
+function getFieldOrTypeSource(typeName, fieldName, primaryEntities, fallbackEntities) {
+  const fid = `gql.field:${typeName}.${fieldName}`;
+  const fieldEnt = primaryEntities.get(fid) || fallbackEntities.get(fid);
+  if (fieldEnt) {
+    return fieldEnt.source;
+  }
+  const tid = `gql.type:${typeName}`;
+  const typeEnt = primaryEntities.get(tid) || fallbackEntities.get(tid);
+  if (typeEnt) {
+    return typeEnt.source;
+  }
+  return null;
+}
+
 function resolveGraphQLEntity(description, dir, primaryEntities, fallbackEntities) {
   let entityId = `gql.schema:${dir}`;
   let source = null;
+
+  // 1. Argument changes: Type.field(arg:) anywhere in the description
+  const argMatch = description.match(/\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\(([A-Za-z_][A-Za-z0-9_]*):?\)/);
+  if (argMatch) {
+    const typeName = argMatch[1];
+    const fieldName = argMatch[2];
+    const argName = argMatch[3];
+    entityId = `gql.arg:${typeName}.${fieldName}.${argName}`;
+    source = getFieldOrTypeSource(typeName, fieldName, primaryEntities, fallbackEntities);
+    return { entityId, source };
+  }
+
+  // 2. Interface changes: <Type> no longer implements interface <Iface>
+  const ifaceMatch = description.match(/\b([A-Za-z_][A-Za-z0-9_]*)\s+no longer implements interface\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+  if (ifaceMatch) {
+    const typeName = ifaceMatch[1];
+    const ifaceName = ifaceMatch[2];
+    entityId = `gql.implements:${typeName}.${ifaceName}`;
+    const tid = `gql.type:${typeName}`;
+    const typeEnt = primaryEntities.get(tid) || fallbackEntities.get(tid);
+    if (typeEnt) {
+      source = typeEnt.source;
+    }
+    return { entityId, source };
+  }
+
+  // 3. Union member changes: <Member> was removed from union type <Union>
+  const unionMatch = description.match(/\b([A-Za-z_][A-Za-z0-9_]*)\s+was removed from union type\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+  if (unionMatch) {
+    const memberName = unionMatch[1];
+    const unionName = unionMatch[2];
+    entityId = `gql.union:${unionName}.${memberName}`;
+    const uid = `gql.type:${unionName}`;
+    const unionEnt = primaryEntities.get(uid) || fallbackEntities.get(uid);
+    if (unionEnt) {
+      source = unionEnt.source;
+    }
+    return { entityId, source };
+  }
 
   const fieldMatch = description.match(/\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\b/);
   if (fieldMatch) {
@@ -255,9 +312,9 @@ function resolveGraphQLEntity(description, dir, primaryEntities, fallbackEntitie
     return { entityId, source };
   }
 
-  const leadingMatch = description.match(/^(?:Type|Enum|Input(?:\s+object)?(?:\s+type)?|Interface|Union|Scalar|Directive)\s+@?([A-Za-z_][A-Za-z0-9_]*)\b/i);
+  const leadingMatch = description.match(/^(?:Type|Enum|Input(?:\s+object)?(?:\s+type)?|Interface|Union|Scalar|Directive|Field)\s+@?([A-Za-z_][A-Za-z0-9_]*)\b/i);
   let typeName = null;
-  if (leadingMatch) {
+  if (leadingMatch && !PREDICATE_WORDS.has(leadingMatch[1].toLowerCase())) {
     typeName = leadingMatch[1];
   } else {
     const firstWordMatch = description.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/);
@@ -266,13 +323,13 @@ function resolveGraphQLEntity(description, dir, primaryEntities, fallbackEntitie
     }
   }
 
-  if (typeName && !FORBIDDEN_TYPES.has(typeName)) {
+  if (typeName) {
     const tid = `gql.type:${typeName}`;
     const ent = primaryEntities.get(tid) || fallbackEntities.get(tid);
     if (ent) {
       entityId = ent.id;
       source = ent.source;
-    } else {
+    } else if (!FORBIDDEN_TYPES.has(typeName)) {
       entityId = tid;
     }
   }
