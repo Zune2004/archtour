@@ -199,6 +199,19 @@ export function cleanIdentifier(raw) {
 }
 
 /**
+ * Strips quotes and backticks from an identifier while preserving schema qualification.
+ * Lowercases the result.
+ */
+export function cleanQualifiedName(raw) {
+  if (!raw) return "";
+  let s = raw.trim().replace(/^\s*ONLY\s+/i, "").replace(/\s*\*\s*$/, "");
+  return s
+    .split(".")
+    .map(p => p.replace(/["`]/g, "").trim().toLowerCase())
+    .join(".");
+}
+
+/**
  * Detects whether a new type is narrower than the old type:
  * e.g. text -> varchar(n), bigint -> int, varchar(255) -> varchar(100), etc.
  */
@@ -541,6 +554,8 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
   const statements = splitSqlStatements(cleanedContent);
   const createdInThisFile = new Set();
   const tempTablesInThisFile = new Set();
+  const createdTablesForTruncate = new Set();
+  const createdSchemasForDrop = new Set();
   const createdSchemasInThisFile = new Set();
   const views = viewsByEntities.get(entities) || new Set();
   viewsByEntities.set(entities, views);
@@ -613,9 +628,16 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
     // CREATE SCHEMA
     const createSchemaMatch = text.match(/^\s*CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:([^\s;(]+)(?:\s+AUTHORIZATION\s+[^\s;(]+)?|AUTHORIZATION\s+([^\s;(]+))/i);
     if (createSchemaMatch) {
-      const sName = cleanIdentifier(createSchemaMatch[1] || createSchemaMatch[2]);
+      const rawSchema = createSchemaMatch[1] || createSchemaMatch[2];
+      const sName = cleanIdentifier(rawSchema);
       if (sName) {
         createdSchemasInThisFile.add(sName.toLowerCase());
+      }
+      if (!/\bIF\s+NOT\s+EXISTS\b/i.test(createSchemaMatch[0])) {
+        const qName = cleanQualifiedName(rawSchema);
+        if (qName) {
+          createdSchemasForDrop.add(qName);
+        }
       }
       continue;
     }
@@ -625,6 +647,12 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
     if (createTableMatch) {
       const rawTableName = createTableMatch[1];
       const tableName = cleanIdentifier(rawTableName);
+      if (!/\bIF\s+NOT\s+EXISTS\b/i.test(createTableMatch[0])) {
+        const qName = cleanQualifiedName(rawTableName);
+        if (qName) {
+          createdTablesForTruncate.add(qName);
+        }
+      }
       // T-107 (A): a TEMP/TEMPORARY table lives only for this file's session. It never becomes
       // part of the replayed schema, and dropping it is not a destructive schema change.
       if (/^\s*CREATE\s+(?:TEMPORARY|TEMP)\s+TABLE\b/i.test(text)) {
@@ -720,6 +748,12 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
     const createTempAsMatch = text.match(/^\s*CREATE\s+(?:TEMPORARY|TEMP)\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)\s+AS\b/i);
     if (createTempAsMatch) {
       tempTablesInThisFile.add(cleanIdentifier(createTempAsMatch[1]).toLowerCase());
+      if (!/\bIF\s+NOT\s+EXISTS\b/i.test(createTempAsMatch[0])) {
+        const qName = cleanQualifiedName(createTempAsMatch[1]);
+        if (qName) {
+          createdTablesForTruncate.add(qName);
+        }
+      }
       continue;
     }
 
@@ -770,7 +804,8 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
       for (const rs of rawSchemas) {
         const sName = cleanIdentifier(rs);
         if (!sName) continue;
-        if (!createdSchemasInThisFile.has(sName.toLowerCase())) {
+        const qName = cleanQualifiedName(rs);
+        if (!createdSchemasForDrop.has(qName)) {
           fileEvents.push({
             type: "sql.drop_schema",
             entityId: `db.schema:${sName}`,
@@ -808,8 +843,8 @@ export function parseSqlFacts(filePath, content, getStableId, entities, relation
       for (const rt of rawTables) {
         const tName = cleanIdentifier(rt);
         if (!tName) continue;
-        const tLower = tName.toLowerCase();
-        if (!createdInThisFile.has(tLower) && !tempTablesInThisFile.has(tLower)) {
+        const qName = cleanQualifiedName(rt);
+        if (!createdTablesForTruncate.has(qName)) {
           fileEvents.push({
             type: "sql.truncate",
             entityId: `db.table:${tName}`,
