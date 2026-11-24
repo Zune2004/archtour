@@ -1,6 +1,6 @@
 {
   "name": "archtour",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "description": "Blocks risky pull requests: dropped columns, breaking API changes, privileged containers, public ports, deleted databases. Open source, runs in your CI.",
   "license": "MIT",
