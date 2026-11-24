@@ -1729,6 +1729,29 @@ export function formatMarkdownReport(findingsArg = [], optsArg = {}) {
   const overriddenFindings = findings.filter(f => f.overridden);
   const exceptedFindings = findings.filter(f => f.excepted);
 
+  // Apply --only filter for display (but keep title counts as all findings)
+  const onlyLevels = opts.onlyLevels;
+  let displayFindings = activeFindings;
+  if (onlyLevels && onlyLevels.length > 0) {
+    displayFindings = activeFindings.filter(f => onlyLevels.includes(f.level));
+  }
+
+  // Apply pagination for display
+  const offset = opts.offset || 0;
+  const limit = opts.limit;
+  if (offset > 0) {
+    displayFindings = displayFindings.slice(offset);
+  }
+  if (limit !== undefined && limit > 0) {
+    displayFindings = displayFindings.slice(0, limit);
+  }
+
+  // Re-compute display groups from filtered/paginated findings
+  const displayHard = displayFindings.filter(f => f.level === "hard");
+  const displaySoft = displayFindings.filter(f => f.level === "soft");
+  const displayWarn = displayFindings.filter(f => f.level === "warn");
+  const displayAdvisory = displayFindings.filter(f => f.level === "advisory");
+
   const blockingCount = hardFindings.length + softFindings.length;
   const overriddenCount = overriddenFindings.length;
   const exceptedCount = exceptedFindings.length;
@@ -1765,7 +1788,9 @@ export function formatMarkdownReport(findingsArg = [], optsArg = {}) {
     sections.push(lines.join("\n"));
   }
 
-  if (findings.length === 0) {
+  if (displayFindings.length === 0 && activeFindings.length > 0) {
+    sections.push("\n(No findings match the current filter)");
+  } else if (findings.length === 0) {
     if (opts.noCandidateFiles || (opts.candidateFilesExamined !== undefined && opts.candidateFilesExamined === 0)) {
       sections.push("\nNo candidate architecture files were changed or examined.");
     } else {
@@ -1816,21 +1841,21 @@ export function formatMarkdownReport(findingsArg = [], optsArg = {}) {
     return lines.join("\n");
   }
 
-  const hardSection = formatGroup("⛔ Hard", hardFindings, false); // hard findings are never capped in the comment
+  const hardSection = formatGroup("⛔ Hard", displayHard, false); // hard findings are never capped in the comment
   if (hardSection) sections.push(hardSection);
 
-  const softSection = formatGroup("⚠️ Soft", softFindings, true);
+  const softSection = formatGroup("⚠️ Soft", displaySoft, true);
   if (softSection) {
     const softRules = Array.from(new Set(softFindings.map(f => f.ruleId))).join(",");
     const sha = opts.headSha ? opts.headSha : "<sha>";
     sections.push(softSection + `\n\nTo override: \`/archtour override ${softRules} ${sha} <reason>\``);
   }
 
-  const warnSection = formatGroup("⚠️ Warn", warnFindings, true);
+  const warnSection = formatGroup("⚠️ Warn", displayWarn, true);
   if (warnSection) sections.push(warnSection);
 
-  const skipNotices = advisoryFindings.filter(f => f.ruleId === "file-not-checked");
-  const advisoryRest = advisoryFindings.filter(f => f.ruleId !== "file-not-checked");
+  const skipNotices = displayAdvisory.filter(f => f.ruleId === "file-not-checked");
+  const advisoryRest = displayAdvisory.filter(f => f.ruleId !== "file-not-checked");
 
   const advisorySection = formatGroup("ℹ️ Advisory", advisoryRest, true);
   if (advisorySection) sections.push(advisorySection);

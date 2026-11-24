@@ -46,6 +46,70 @@ function die(msg, code = 1) {
   process.exit(code);
 }
 
+function getOutputFindings(findings, opts) {
+  let filtered = findings;
+  if (opts.only !== undefined) {
+    const levels = String(opts.only).split(",").map(s => s.trim()).filter(Boolean);
+    filtered = filtered.filter(f => levels.includes(f.level));
+  }
+  // Sort by level priority (hard=1, soft=2, warn=3, advisory=4), then by file path for consistent ordering
+  const levelPriority = { hard: 1, soft: 2, warn: 3, advisory: 4 };
+  filtered.sort((a, b) => {
+    const pa = levelPriority[a.level] || 99;
+    const pb = levelPriority[b.level] || 99;
+    if (pa !== pb) return pa - pb;
+    const fa = a.source?.file || "";
+    const fb = b.source?.file || "";
+    return fa.localeCompare(fb);
+  });
+  const totalMatched = filtered.length;
+  const offset = opts.offset || 0;
+  const limit = opts.limit;
+  let paginated = filtered;
+  if (offset > 0) {
+    paginated = paginated.slice(offset);
+  }
+  if (limit !== undefined && limit > 0) {
+    paginated = paginated.slice(0, limit);
+  }
+  let showingLine = null;
+  if (limit !== undefined || offset > 0) {
+    const start = offset + 1;
+    const end = Math.min(offset + (limit || totalMatched), totalMatched);
+    if (start > totalMatched) {
+      showingLine = `showing 0 of ${totalMatched}`;
+    } else {
+      // "next" only while more findings remain after this page.
+      showingLine = end < totalMatched
+        ? `showing ${start}-${end} of ${totalMatched}; next: --offset ${end}`
+        : `showing ${start}-${end} of ${totalMatched}`;
+    }
+  }
+  return { outputFindings: paginated, totalMatched, showingLine };
+}
+
+function formatBriefReport(findings, verdict, exitCode, summary, showingLine) {
+  const lines = [];
+  for (const f of findings) {
+    const level = f.level;
+    const ruleId = f.ruleId;
+    const entity = f.event?.entityId || "unknown";
+    let fileLine = "unknown";
+    if (f.source?.file) {
+      fileLine = f.source.file;
+      if (f.source?.line !== undefined && f.source?.line !== null) {
+        fileLine += `:${f.source.line}`;
+      }
+    }
+    lines.push(`${level} ${ruleId} ${entity} ${fileLine}`);
+  }
+  if (showingLine) {
+    lines.push(showingLine);
+  }
+  lines.push(`verdict: ${verdict} (exit ${exitCode}): ${summary.hard} hard, ${summary.soft} soft, ${summary.warn} warn, ${summary.advisory} advisory`);
+  return lines.join("\n");
+}
+
 function ensureDir(dirPath) {
   if (!dirPath || dirPath === "." || dirPath === "") return;
   if (!fs.existsSync(dirPath)) {
@@ -222,6 +286,20 @@ function parseArgs(argv, command) {
       out.changedFrom = argv[++i];
     } else if (a.startsWith("--changed-from=")) {
       out.changedFrom = a.slice("--changed-from=".length);
+    } else if (a === "--brief") {
+      out.brief = true;
+    } else if (a === "--only") {
+      out.only = argv[++i];
+    } else if (a.startsWith("--only=")) {
+      out.only = a.slice("--only=".length);
+    } else if (a === "--limit") {
+      out.limit = Number(argv[++i]);
+    } else if (a.startsWith("--limit=")) {
+      out.limit = Number(a.slice("--limit=".length));
+    } else if (a === "--offset") {
+      out.offset = Number(argv[++i]);
+    } else if (a.startsWith("--offset=")) {
+      out.offset = Number(a.slice("--offset=".length));
     } else if (a === "--cache-dir") {
       out.cacheDir = argv[++i];
     } else if (a.startsWith("--cache-dir=")) {
@@ -485,6 +563,30 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   const policyFrom = opts.policyFrom || "base";
   if (policyFrom !== "base" && policyFrom !== "head") {
     die(`invalid --policy-from: "${policyFrom}". Must be "base" or "head"`, 3);
+  }
+
+  // Validate new agent output flags
+  if (opts.brief && opts.json) {
+    die("--brief cannot be combined with --json", 3);
+  }
+  if (opts.only !== undefined) {
+    const levels = String(opts.only).split(",").map(s => s.trim()).filter(Boolean);
+    const validLevels = ["hard", "soft", "warn", "advisory"];
+    for (const level of levels) {
+      if (!validLevels.includes(level)) {
+        die("--only takes hard, soft, warn, advisory (comma-separated)", 3);
+      }
+    }
+  }
+  if (opts.limit !== undefined) {
+    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
+      die("--limit takes a whole number >= 1", 3);
+    }
+  }
+  if (opts.offset !== undefined) {
+    if (!Number.isInteger(opts.offset) || opts.offset < 0) {
+      die("--offset takes a whole number >= 0", 3);
+    }
   }
 
   let policyDir;
@@ -792,12 +894,30 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
     exitCode = 0;
   }
 
+  // Compute full summary from ALL findings (for verdict line)
+  // Counts of active findings (not overridden or excepted), as the --json summary has always counted them.
+  const activeForSummary = findings.filter(f => !f.excepted && !f.overridden);
+  const fullSummary = {
+    hard: activeForSummary.filter(f => f.level === "hard").length,
+    soft: activeForSummary.filter(f => f.level === "soft").length,
+    warn: activeForSummary.filter(f => f.level === "warn").length,
+    advisory: activeForSummary.filter(f => f.level === "advisory").length
+  };
+  const verdict = exitCode === 1 ? "failed" : exitCode === 2 ? "warning" : "passed";
+
+  // Get filtered/paginated findings for output
+  const { outputFindings, totalMatched, showingLine } = getOutputFindings(findings, opts);
+
+  // Markdown output with filtered findings (but title uses all findings)
   const mdReport = formatMarkdownReport(findings, {
     celebrations,
     policyChanges,
     headSha: opts.headSha || "",
     candidateFilesExamined: candidateFilesCount,
-    noCandidateFiles: candidateFilesCount === 0
+    noCandidateFiles: candidateFilesCount === 0,
+    onlyLevels: opts.only ? String(opts.only).split(",").map(s => s.trim()).filter(Boolean) : null,
+    limit: opts.limit,
+    offset: opts.offset || 0
   });
 
   // Detect if the markdown was capped: both the per-rule line and the 60,000-character line say "(see the job log".
@@ -827,7 +947,9 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
     }
   }
 
-  if (opts.json) {
+  if (opts.brief) {
+    console.log(formatBriefReport(outputFindings, verdict, exitCode, fullSummary, showingLine));
+  } else if (opts.json) {
     const activeFindings = findings.filter(f => !f.excepted && !f.overridden);
     const counts = {
       total: findings.length,
@@ -835,21 +957,28 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       overridden: findings.filter(f => f.overridden).length,
       excepted: findings.filter(f => f.excepted).length,
       warnings: activeFindings.filter(f => f.level === "warn" || f.level === "advisory").length,
-      hard: activeFindings.filter(f => f.level === "hard").length,
-      soft: activeFindings.filter(f => f.level === "soft").length,
-      warn: activeFindings.filter(f => f.level === "warn").length,
-      advisory: activeFindings.filter(f => f.level === "advisory").length
+      hard: fullSummary.hard,
+      soft: fullSummary.soft,
+      warn: fullSummary.warn,
+      advisory: fullSummary.advisory
     };
-    const verdict = exitCode === 1 ? "failed" : exitCode === 2 ? "warning" : "passed";
-    console.log(JSON.stringify({
+    const output = {
       verdict,
       exitCode,
       summary: counts,
-      findings,
+      findings: outputFindings,
       overrides: auditOverrides,
       celebrations,
       warnings: rulesResult.warnings || []
-    }, null, 2));
+    };
+    if (opts.limit !== undefined || opts.offset !== undefined || opts.only !== undefined) {
+      output.shown = {
+        offset: opts.offset || 0,
+        limit: opts.limit ?? null,
+        matched: totalMatched
+      };
+    }
+    console.log(JSON.stringify(output, null, 2));
   } else {
     console.log(mdReport.trimEnd());
     if (celebrations.length > 0 && !mdReport.includes(celebrations[0])) {
@@ -933,6 +1062,10 @@ function printCheckHelp() {
   console.log("  --pr-author <user>          PR author");
   console.log("  --policy-from <base|head>   Base or head policy to use");
   console.log("  --head-sha <sha>            Head commit SHA");
+  console.log("  --brief                     One line per finding, verdict last (cannot combine with --json)");
+  console.log("  --only <levels>             Comma-separated levels to list: hard,soft,warn,advisory");
+  console.log("  --limit <n>                 Maximum findings to show (>=1)");
+  console.log("  --offset <n>                Skip first N findings (>=0)");
 }
 
 function printBaselineHelp() {

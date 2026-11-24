@@ -205,6 +205,33 @@ For large repositories with tens of thousands of files:
 
 ---
 
+### Agent output (AI/CLI consumption)
+
+`archtour check` supports machine-friendly output modes for AI agents and scripts:
+
+| Flag | Description |
+|---|---|
+| `--brief` | One line per finding: `<level> <ruleId> <entity> <file>:<line>`. No markdown. Last line is the verdict: `verdict: <passed|warning|failed> (exit <code>): <hard> hard, <soft> soft, <warn> warn, <advisory> advisory`. Cannot combine with `--json`. |
+| `--only <levels>` | Comma-separated list of levels to list (`hard,soft,warn,advisory`). Filters which findings appear in the output (both `--brief` and default markdown). The verdict line and summary counts **always reflect ALL findings**, not just the filtered ones. |
+| `--limit <n>` | Maximum findings to show (integer `>= 1`). Applies after `--only` filter. |
+| `--offset <n>` | Skip first N findings (integer `>= 0`, default `0`). Applies after `--only` filter. |
+
+**Pagination in `--brief`**: When `--limit` or `--offset` is used, a `showing <start>-<end> of <total>; next: --offset <next>` line is printed before the verdict line.
+
+**JSON output with pagination**: When `--limit` or `--offset` is used, the JSON includes a `shown` field:
+```json
+"shown": { "offset": 0, "limit": 2, "matched": 5 }
+```
+The `findings` array contains the filtered/paginated results; `summary` is unchanged (all findings).
+
+**Error cases (exit 3, one-line stderr, no stack trace)**:
+- `--brief --json` combined: `--brief cannot be combined with --json`
+- `--only` with invalid level: `--only takes hard, soft, warn, advisory (comma-separated)`
+- `--limit` with invalid value (`< 1` or non-integer): `--limit takes a whole number >= 1`
+- `--offset` with invalid value (`< 0` or non-integer): `--offset takes a whole number >= 0`
+
+---
+
 ## 5. Flexibility & Escape Valves
 
 Archtour Guardrails are designed to guide developers rather than create roadblocks. Five auditable escape valves provide pragmatic flexibility:

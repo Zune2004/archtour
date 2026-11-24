@@ -41,6 +41,10 @@ Architecture guardrails for a change (the CI gate).
 | `--md` | Write markdown report to file (alias for --markdown) |
 | `--markdown <file>` | Write markdown report to file |
 | `--log-all` | Print every finding to stderr (job log), even if the report is not capped |
+| `--brief` | One line per finding (`<level> <ruleId> <entity> <file>:<line>`), verdict last; cannot combine with --json |
+| `--only <levels>` | Comma-separated levels to list: hard,soft,warn,advisory (counts, verdict and exit code still cover all findings) |
+| `--limit <n>` | Maximum findings to show (>= 1); a `showing ...; next: --offset N` line follows while more remain |
+| `--offset <n>` | Skip the first N findings (>= 0) |
 | `--rules <file>` | Custom rules file |
 | `--include-untracked` | Include untracked files with --changed-from |
 | `--cache-dir <dir>` | Directory to cache extracted facts |
