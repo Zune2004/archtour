@@ -97,12 +97,28 @@ jobs:
 with the same result). Do not skip the job with an `if:`: GitHub counts a skipped required check as passed.
 
 Optional inputs: `paths`, `ignore`, `include-tests`, `migration-dirs` (extra migration folders, comma-separated, e.g.
-`db/deploy`), `max-file-size` (MB, default 5) and `render-helm` (`auto` by default; `on` fails with exit 3 when helm is
-missing, `off` keeps the raw-template behaviour).
+`db/deploy`), `max-file-size` (MB, default 5), `render-helm` (`auto` by default; `on` fails with exit 3 when helm is
+missing, `off` keeps the raw-template behaviour) and `needs-human-label` (label to add when the PR needs human review).
 
 - **`hard` findings** (e.g. privileged container, removing API route security, deleting databases in Terraform): exit code `1`, blocks merge, cannot be overridden in pull requests.
 - **`soft` findings** (e.g. dropped database columns, removed API routes): exit code `2`, blocks merge unless overridden by an authorized owner.
 - Summarizes findings in a single updated pull request comment and GitHub workflow annotations.
+
+## Agent-written PRs
+
+`needs-human` tells you whether a PR can merge without a person: it is `true` when the PR changes a database
+migration or schema, an API contract (OpenAPI, GraphQL, proto) or the `.archtour/` policy, or has a blocking finding
+(also an overridden one). It never changes the verdict or the exit code. Auto-merge only when it is `false`:
+
+```yaml
+      - uses: Zune2004/archtour@v0
+        id: archtour
+        with:
+          needs-human-label: needs-human   # optional: added when true, removed when false
+      - if: steps.archtour.outputs.needs-human == 'false'
+        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}"
+        env: { GH_TOKEN: "${{ github.token }}" }
+```
 
 ## Check locally before you push
 

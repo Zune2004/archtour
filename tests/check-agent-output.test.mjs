@@ -373,8 +373,10 @@ test("T-127: default output unchanged when no new flags (byte-for-byte)", () => 
   const tmp = createFixtureDefault();
   try {
     // Stored from 0.3.1 + T-125 before the build (orchestrator, 2026-11-23); the new flags must not change it.
+    // T-128 (2026-11-24) adds the "Needs a human" line under the title on purpose.
     const EXPECTED =
-      "## ✅ Architecture Guardrails: Passed (0 blocking, 0 overridden, 0 excepted, 0 warnings, 1 advisory)\n\n" +
+      "## ✅ Architecture Guardrails: Passed (0 blocking, 0 overridden, 0 excepted, 0 warnings, 1 advisory)\n" +
+      "Needs a human: no\n\n" +
       "### ℹ️ Advisory (1)\n" +
       "- **Container image changed. - Service 'app' image changed from 'nginx' to 'nginx:1.21'** (`service-image-changed`)\n" +
       "  - Entity: `service:app`\n" +

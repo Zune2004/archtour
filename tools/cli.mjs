@@ -36,6 +36,61 @@ import { helmAvailable, loadHelmConfig } from "./helm-render.mjs";
 
 // ---------------------------------------------------------------- helpers
 
+// A PR needs a human when a file it changes is a database or API contract source (as the facts already classify it),
+// when it changes the Archtour policy (.archtour/), or when it has a blocking finding, overridden or not.
+// It is information only: it never changes the verdict or the exit code.
+const NEEDS_HUMAN_DB_KINDS = new Set(["Database"]);
+const NEEDS_HUMAN_API_KINDS = new Set(["API", "GraphQL", "Protobuf"]);
+
+function computeNeedsHuman(changedPaths = [], baseFacts = {}, headFacts = {}, findings = []) {
+  const kindOf = new Map();
+  for (const src of [...(baseFacts.sources || []), ...(headFacts.sources || [])]) {
+    if (src && src.path && src.kind) kindOf.set(src.path.split(String.fromCharCode(92)).join("/"), src.kind);
+  }
+  const reasons = [];
+  for (const raw of changedPaths) {
+    const file = String(raw).split(String.fromCharCode(92)).join("/");
+    if (file === ".archtour" || file.startsWith(".archtour/")) reasons.push(`Archtour policy change: ${file}`);
+    else if (NEEDS_HUMAN_DB_KINDS.has(kindOf.get(file))) reasons.push(`database change: ${file}`);
+    else if (NEEDS_HUMAN_API_KINDS.has(kindOf.get(file))) reasons.push(`API contract change: ${file}`);
+  }
+  for (const f of findings) {
+    if (!f.excepted && (f.level === "hard" || f.level === "soft")) reasons.push(`blocking finding: ${f.ruleId}`);
+  }
+  const unique = [...new Set(reasons)];
+  return { value: unique.length > 0, reasons: unique };
+}
+
+// Files under <dir>/.archtour/, relative to <dir> (the policy folder is not part of file discovery).
+function listPolicyFiles(dir) {
+  const root = path.join(dir, ".archtour");
+  const out = [];
+  const walk = (abs, rel) => {
+    let entries;
+    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const relPath = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(path.join(abs, e.name), relPath);
+      else if (e.isFile()) out.push(relPath);
+    }
+  };
+  walk(root, ".archtour");
+  return out;
+}
+
+// <base> <head> folder mode: the paths (relative) whose content differs between the two folders, or that exist on
+// only one side.
+function changedBetweenDirs(baseDir, headDir, relPaths) {
+  const read = (p) => { try { return fs.readFileSync(p); } catch { return null; } };
+  const changed = [];
+  for (const rel of new Set(relPaths)) {
+    const a = read(path.join(baseDir, rel));
+    const b = read(path.join(headDir, rel));
+    if (a === null || b === null ? a !== b : !a.equals(b)) changed.push(rel);
+  }
+  return changed;
+}
+
 function die(msg, code = 1) {
   if (process.env.ARCHTOUR_DEBUG === "1") {
     console.error(new Error(msg));
@@ -648,12 +703,15 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   let findings = [];
   let events = [];
   let candidateFilesCount = 0;
+  let candidatePaths = [];
+  let changedPaths = []; // files the change touches (for needsHuman); none in --state mode
 
   const cache = opts.cacheDir ? new FactsCache(opts.cacheDir) : null;
 
   if (isStateMode) {
     const headDisc = discoverFiles(stateDir, opts);
     candidateFilesCount = headDisc.files ? headDisc.files.length : 0;
+    candidatePaths = headDisc.files ? headDisc.files.map(f => f.path) : [];
     headFacts = extractFacts(headDisc.files, { truncated: headDisc.truncated, reason: headDisc.reason, rootDir: stateDir });
     events = extractStateEvents(headFacts);
     const evalRes = evaluateRules(rulesResult.rules, { events }, {}, headFacts, opts);
@@ -687,6 +745,8 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       die(`--changed-from ${opts.changedFrom}: ${String(err.stderr || err.message).trim()}`, 3);
     }
     candidateFilesCount = changedRes.candidatePaths ? changedRes.candidatePaths.length : 0;
+    candidatePaths = changedRes.candidatePaths || [];
+    changedPaths = changedRes.changedPaths || [];
     baseFacts = changedRes.baseFacts;
     headFacts = changedRes.headFacts;
     const diff = diffFacts(baseFacts, headFacts);
@@ -701,6 +761,17 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
     headFacts = extractFacts(headDisc.files, { truncated: headDisc.truncated, reason: headDisc.reason, rootDir: headDir });
 
     candidateFilesCount = (baseDisc.files ? baseDisc.files.length : 0) + (headDisc.files ? headDisc.files.length : 0);
+    candidatePaths = [
+      ...(baseDisc.files ? baseDisc.files.map(f => f.path) : []),
+      ...(headDisc.files ? headDisc.files.map(f => f.path) : [])
+    ];
+
+    changedPaths = changedBetweenDirs(baseDir, headDir, [
+      ...(baseDisc.files || []).map(f => f.path),
+      ...(headDisc.files || []).map(f => f.path),
+      ...listPolicyFiles(baseDir),
+      ...listPolicyFiles(headDir)
+    ]);
 
     const diff = diffFacts(baseFacts, headFacts);
     events = diff.events;
@@ -888,6 +959,9 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   // Overrides
   const { auditOverrides } = applyOverrides(findings, rulesResult.rules, opts);
 
+  // Needs-human computation
+  const needsHuman = computeNeedsHuman(changedPaths, baseFacts, headFacts, findings);
+
   // Exit code calculation
   let exitCode = getExitCode(findings);
   if (isStateMode && !opts.strict) {
@@ -917,7 +991,8 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
     noCandidateFiles: candidateFilesCount === 0,
     onlyLevels: opts.only ? String(opts.only).split(",").map(s => s.trim()).filter(Boolean) : null,
     limit: opts.limit,
-    offset: opts.offset || 0
+    offset: opts.offset || 0,
+    needsHuman
   });
 
   // Detect if the markdown was capped: both the per-rule line and the 60,000-character line say "(see the job log".
@@ -969,7 +1044,8 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       findings: outputFindings,
       overrides: auditOverrides,
       celebrations,
-      warnings: rulesResult.warnings || []
+      warnings: rulesResult.warnings || [],
+      needsHuman
     };
     if (opts.limit !== undefined || opts.offset !== undefined || opts.only !== undefined) {
       output.shown = {

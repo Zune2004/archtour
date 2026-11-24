@@ -631,6 +631,23 @@ Archtour Guardrails integrates directly into GitHub Actions via `uses: Zune2004/
 | `strict-release` | When `true`, un-overridden soft findings fail release, tag, or push runs | `false` |
 | `github-token` | Token used for GitHub API checks (comments, collaborators, teams). Note: `@org/team` owners require a GitHub App or fine-grained PAT with `Members: read`. | `${{ github.token }}` |
 | `comment` | Whether to post or update a PR comment | `true` |
+| `needs-human-label` | Label to add when the PR needs human review (optional) | `""` |
+
+### Action Outputs
+
+| Output | Description |
+|---|---|
+| `needs-human` | Whether the PR needs human review (`true`/`false`) |
+| `needs-human-reasons` | Semicolon-separated reasons why human review is needed |
+| `verdict` | The guardrails verdict: `passed`, `warning`, or `failed` |
+
+The PR needs a human when a file it changes is a database source (a SQL or ClickHouse migration, including
+`--migration-dir` folders, or a Prisma schema), an API contract (OpenAPI, GraphQL or Protocol Buffers), or anything
+under `.archtour/`, or when it has a blocking (hard or soft) finding, also an overridden one. Only the files the PR
+changes count, not the rest of the repository; in `--state` mode only blocking findings count. `needs-human` never
+changes the verdict or the exit code. `--json` has it as `needsHuman: { value, reasons }`, and the markdown report has
+a line under the title: `Needs a human: yes (<first reason>)` or `Needs a human: no`. Adding and removing the label
+needs `pull-requests: write`.
 
 ### Required Status Check Setup with GitHub Rulesets
 

@@ -1773,7 +1773,12 @@ export function formatMarkdownReport(findingsArg = [], optsArg = {}) {
     headerVerdict = `## ✅ Architecture Guardrails: Passed ${countStr}`;
   }
 
-  const sections = [headerVerdict];
+  const needsHuman = opts.needsHuman || { value: false, reasons: [] };
+  const needsHumanLine = needsHuman.value
+    ? `Needs a human: yes (${needsHuman.reasons[0] || "unknown reason"})`
+    : "Needs a human: no";
+
+  const sections = [headerVerdict, needsHumanLine];
 
   if (opts.celebrations && opts.celebrations.length > 0) {
     sections.push("\n" + opts.celebrations.join("\n"));

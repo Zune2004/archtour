@@ -1323,7 +1323,9 @@ export async function getChangedFacts(repoDir, changedFromRef, opts = {}, cache 
   baseFacts._renames = renames;
   headFacts._renames = renames;
 
-  return { baseFacts, headFacts, mergeBase, candidatePaths, rootDir };
+  // changedPaths: every file the change touches under the scanned folder, relative to it (candidatePaths also holds the
+  // expanded migration and GraphQL folders, which the change did not touch).
+  return { baseFacts, headFacts, mergeBase, candidatePaths, rootDir, changedPaths: rawChanged.map(display) };
 }
 
 // Repo-relative, forward-slash path of dir inside rootDir ("" for the root itself).
