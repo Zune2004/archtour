@@ -213,12 +213,13 @@ test("T-127: brief mode lists all findings with correct format and verdict line"
     // 3 finding lines + 1 verdict line = 4 lines
     assert.equal(lines.length, 4, `Expected 4 lines, got ${lines.length}: ${JSON.stringify(lines)}`);
 
-    // Exact finding lines (order: sql-no-drop-column, no-api-route-removed, service-image-changed)
+    // Exact finding lines in report order: grouped by level, the check's own order inside a level (review 12: the
+    // first version sorted by file name in place, which also reordered the default --json and markdown output).
     // Note: sql-no-drop-column is soft in built-in rules, not hard as brief example 1 states
     const findingLines = lines.slice(0, 3);
     assert.deepStrictEqual(findingLines, [
-      "soft sql-no-drop-column db.column:users.email migrations/V2__drop_email.sql:1",
       "soft no-api-route-removed api.route:GET /items openapi.yaml:6",
+      "soft sql-no-drop-column db.column:users.email migrations/V2__drop_email.sql:1",
       "advisory service-image-changed service:app docker-compose.yml:2"
     ], `Finding lines mismatch: ${JSON.stringify(findingLines)}`);
 

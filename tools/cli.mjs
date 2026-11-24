@@ -28,7 +28,8 @@ import {
   loadExceptionsFile,
   applyExceptions,
   applyOverrides,
-  diffPolicy
+  diffPolicy,
+  sortByReportLevel
 } from "./rules.mjs";
 import { auditHistory } from "./history.mjs";
 import { setSettings } from "./settings.mjs";
@@ -51,6 +52,8 @@ function computeNeedsHuman(changedPaths = [], baseFacts = {}, headFacts = {}, fi
   for (const raw of changedPaths) {
     const file = String(raw).split(String.fromCharCode(92)).join("/");
     if (file === ".archtour" || file.startsWith(".archtour/")) reasons.push(`Archtour policy change: ${file}`);
+    // A PR that edits CI can switch this very check off.
+    else if (file.startsWith(".github/workflows/") || file.startsWith(".github/actions/")) reasons.push(`CI workflow change: ${file}`);
     else if (NEEDS_HUMAN_DB_KINDS.has(kindOf.get(file))) reasons.push(`database change: ${file}`);
     else if (NEEDS_HUMAN_API_KINDS.has(kindOf.get(file))) reasons.push(`API contract change: ${file}`);
   }
@@ -101,22 +104,17 @@ function die(msg, code = 1) {
   process.exit(code);
 }
 
+// The findings that --brief, --only and --limit/--offset list: the active ones (not overridden or excepted, like the
+// verdict counts and the markdown sections), in the normal report order. Without these flags --json keeps every
+// finding exactly as before. Never sorts or changes `findings` itself.
 function getOutputFindings(findings, opts) {
-  let filtered = findings;
+  const agentMode = opts.brief || opts.only !== undefined || opts.limit !== undefined || opts.offset !== undefined;
+  if (!agentMode) return { outputFindings: findings, totalMatched: findings.length, showingLine: null };
+  let filtered = sortByReportLevel(findings.filter(f => !f.overridden && !f.excepted));
   if (opts.only !== undefined) {
     const levels = String(opts.only).split(",").map(s => s.trim()).filter(Boolean);
     filtered = filtered.filter(f => levels.includes(f.level));
   }
-  // Sort by level priority (hard=1, soft=2, warn=3, advisory=4), then by file path for consistent ordering
-  const levelPriority = { hard: 1, soft: 2, warn: 3, advisory: 4 };
-  filtered.sort((a, b) => {
-    const pa = levelPriority[a.level] || 99;
-    const pb = levelPriority[b.level] || 99;
-    if (pa !== pb) return pa - pb;
-    const fa = a.source?.file || "";
-    const fb = b.source?.file || "";
-    return fa.localeCompare(fb);
-  });
   const totalMatched = filtered.length;
   const offset = opts.offset || 0;
   const limit = opts.limit;

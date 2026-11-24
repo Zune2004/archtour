@@ -642,12 +642,20 @@ Archtour Guardrails integrates directly into GitHub Actions via `uses: Zune2004/
 | `verdict` | The guardrails verdict: `passed`, `warning`, or `failed` |
 
 The PR needs a human when a file it changes is a database source (a SQL or ClickHouse migration, including
-`--migration-dir` folders, or a Prisma schema), an API contract (OpenAPI, GraphQL or Protocol Buffers), or anything
-under `.archtour/`, or when it has a blocking (hard or soft) finding, also an overridden one. Only the files the PR
-changes count, not the rest of the repository; in `--state` mode only blocking findings count. `needs-human` never
-changes the verdict or the exit code. `--json` has it as `needsHuman: { value, reasons }`, and the markdown report has
-a line under the title: `Needs a human: yes (<first reason>)` or `Needs a human: no`. Adding and removing the label
-needs `pull-requests: write`.
+`--migration-dir` folders, or a Prisma schema), an API contract (OpenAPI, GraphQL or Protocol Buffers), a CI workflow
+(`.github/workflows/`, `.github/actions/`) or anything under `.archtour/`, or when it has a blocking (hard or soft)
+finding, also an overridden one. Only the files the PR changes count, not the rest of the repository; in `--state`
+mode only blocking findings count. Migrations Archtour does not read (for example Rails `db/migrate/*.rb` or Django
+`migrations/*.py`) and files outside the checked folder (the Action's `paths`) are not seen, so do not auto-merge on
+`needs-human` alone in those repositories. In the Action, a check that did not finish (exit 3 or a crash) sets
+`needs-human=true` with the reason `check did not complete (exit N)` and `verdict=error`. `needs-human` never changes
+the verdict or the exit code. `--json` has it as `needsHuman: { value, reasons }`, and the markdown report has a line
+under the title: `Needs a human: yes (<first reason>)` or `Needs a human: no`. Adding and removing the label needs
+`pull-requests: write`.
+
+`--brief`, `--only` and `--limit`/`--offset` list the active findings (not overridden or excepted) in report order:
+grouped hard, soft, warn, advisory, in the check's own order inside each level. Without these flags the output is the
+same as before.
 
 ### Required Status Check Setup with GitHub Rulesets
 

@@ -106,18 +106,22 @@ missing, `off` keeps the raw-template behaviour) and `needs-human-label` (label 
 
 ## Agent-written PRs
 
-`needs-human` tells you whether a PR can merge without a person: it is `true` when the PR changes a database
-migration or schema, an API contract (OpenAPI, GraphQL, proto) or the `.archtour/` policy, or has a blocking finding
-(also an overridden one). It never changes the verdict or the exit code. Auto-merge only when it is `false`:
+`needs-human` says whether a PR can merge without a person. It is `true` when the PR changes a migration or schema
+Archtour reads (SQL, ClickHouse, Prisma), an API contract (OpenAPI, GraphQL, proto), a CI workflow or the
+`.archtour/` policy, when it has a blocking finding (also an overridden one), or when the check did not finish. Only
+the folder Archtour checks counts (the Action's `paths`). It never changes the verdict. Merge only when it is `false`,
+and turn auto-merge off again when a later push needs a human (the job needs `contents: write`, `pull-requests: write`):
 
 ```yaml
       - uses: Zune2004/archtour@v0
         id: archtour
         with:
           needs-human-label: needs-human   # optional: added when true, removed when false
-      - if: steps.archtour.outputs.needs-human == 'false'
-        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}"
-        env: { GH_TOKEN: "${{ github.token }}" }
+      - if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env: { GH_TOKEN: "${{ github.token }}", PR: "${{ github.event.pull_request.number }}" }
+        run: |
+          if [ "${{ steps.archtour.outputs.needs-human }}" = "false" ]; then gh pr merge --auto --squash "$PR"
+          else gh pr merge --disable-auto "$PR" || true; fi
 ```
 
 ## Check locally before you push

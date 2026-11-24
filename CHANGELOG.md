@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Needs-human gate for agent-written PRs:** `check` says whether a PR can merge without a person.
+  `--json` has `needsHuman: { value, reasons }`, the report has a `Needs a human: yes (<first reason>)` or
+  `Needs a human: no` line under its title, and the Action has the outputs `needs-human`, `needs-human-reasons` and
+  `verdict`. It is `true` when a file the PR changes is a migration or schema Archtour reads (SQL, ClickHouse, Prisma),
+  an API contract (OpenAPI, GraphQL, proto), a CI workflow or under `.archtour/`, when the PR has a blocking finding
+  (also an overridden one), or, in the Action, when the check did not finish. It never changes the verdict or the exit
+  code. The optional Action input `needs-human-label` adds that label when it is `true` and removes it when `false`.
+  The README shows a workflow that auto-merges only when it is `false`.
+- **Agent output mode:** `check --brief` prints one line per finding and the verdict last
+  (`verdict: failed (exit 1): 1 hard, 1 soft, 0 warn, 1 advisory`). `--only hard,soft` and `--limit`/`--offset`
+  (with a `showing 3-4 of 5; next: --offset 4` line) narrow the list; counts, verdict and exit code always cover all
+  findings. `--json` with these flags adds `shown: { offset, limit, matched }`.
+
+### Changed
+- **The report has one more line:** `Needs a human: ...` under the title, in the terminal, the `--md` file and the PR
+  comment.
+
 ## [0.3.2] - 2026-11-24
 
 ### Changed

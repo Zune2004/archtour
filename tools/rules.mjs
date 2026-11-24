@@ -705,6 +705,14 @@ export function applyExceptions(findings = [], exceptions = []) {
   }
 }
 
+const REPORT_LEVEL_ORDER = { hard: 0, soft: 1, warn: 2, advisory: 3 };
+
+// A copy of the findings in report order: grouped hard, soft, warn, advisory, keeping the original order inside each
+// level (the order the markdown sections list them in). The input array is not changed.
+export function sortByReportLevel(findings = []) {
+  return [...findings].sort((a, b) => (REPORT_LEVEL_ORDER[a.level] ?? 9) - (REPORT_LEVEL_ORDER[b.level] ?? 9));
+}
+
 /**
  * Checks whether overrideBy matches any owner in owners list (or team).
  * When owners is empty, accepts users with write access (write, maintain, admin) other than the PR author:
@@ -1736,9 +1744,10 @@ export function formatMarkdownReport(findingsArg = [], optsArg = {}) {
     displayFindings = activeFindings.filter(f => onlyLevels.includes(f.level));
   }
 
-  // Apply pagination for display
+  // Apply pagination for display, over the report order (hard, soft, warn, advisory), like --brief and --json
   const offset = opts.offset || 0;
   const limit = opts.limit;
+  if (offset > 0 || (limit !== undefined && limit > 0)) displayFindings = sortByReportLevel(displayFindings);
   if (offset > 0) {
     displayFindings = displayFindings.slice(offset);
   }

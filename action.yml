@@ -371,44 +371,27 @@ runs:
           ' "$OUTPUT_DIR/check-result.json"
         fi
 
-        # Extract needs-human outputs from check result
-        if [ -f "$OUTPUT_DIR/check-result.json" ]; then
-          CLEAN_NEEDS_HUMAN=$(node -e '
-            const fs = require("fs");
-            try {
-              const res = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-              const nh = res.needsHuman || { value: false, reasons: [] };
-              console.log(nh.value ? "true" : "false");
-            } catch (e) {
-              console.log("false");
-            }
-          ' "$OUTPUT_DIR/check-result.json" | tr -d '\r\n')
-          
-          CLEAN_NEEDS_HUMAN_REASONS=$(node -e '
-            const fs = require("fs");
-            try {
-              const res = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-              const nh = res.needsHuman || { value: false, reasons: [] };
-              console.log((nh.reasons || []).join("; "));
-            } catch (e) {
-              console.log("");
-            }
-          ' "$OUTPUT_DIR/check-result.json" | tr -d '\r\n')
-          
-          CLEAN_VERDICT=$(node -e '
-            const fs = require("fs");
-            try {
-              const res = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-              console.log(res.verdict || "passed");
-            } catch (e) {
-              console.log("passed");
-            }
-          ' "$OUTPUT_DIR/check-result.json" | tr -d '\r\n')
-
-          echo "needs-human=$CLEAN_NEEDS_HUMAN" >> "$GITHUB_OUTPUT"
-          echo "needs-human-reasons=$CLEAN_NEEDS_HUMAN_REASONS" >> "$GITHUB_OUTPUT"
-          echo "verdict=$CLEAN_VERDICT" >> "$GITHUB_OUTPUT"
-        fi
+        # needs-human outputs. Fail closed: a run that did not finish (exit 3 or a crash) or whose result cannot be read
+        # needs a human, so `needs-human == 'false'` can never come from a check that did not look.
+        CLEAN_NEEDS_HUMAN_OUTPUTS=$(node -e '
+          const fs = require("fs");
+          const exit = Number(process.argv[2]);
+          let res = null;
+          try { res = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch {}
+          let nh, verdict;
+          if (![0, 1, 2].includes(exit) || !res || !res.needsHuman) {
+            nh = { value: true, reasons: [`check did not complete (exit ${exit})`] };
+            verdict = "error";
+          } else {
+            nh = res.needsHuman;
+            verdict = res.verdict;
+          }
+          const clean = (s) => String(s).replace(/[\r\n]+/g, " ");
+          console.log(`needs-human=${nh.value ? "true" : "false"}`);
+          console.log(`needs-human-reasons=${clean((nh.reasons || []).join("; "))}`);
+          console.log(`verdict=${clean(verdict)}`);
+        ' "$OUTPUT_DIR/check-result.json" "$CHECK_EXIT")
+        printf '%s\n' "$CLEAN_NEEDS_HUMAN_OUTPUTS" >> "$GITHUB_OUTPUT"
 
         if [ "$CHECK_EXIT" -eq 1 ]; then
           echo "::error::Architecture guardrails failed with hard findings (exit code 1)."
