@@ -29,6 +29,9 @@ Architecture guardrails for a change (the CI gate).
 |--------|--------------|
 | `--changed-from <ref>` | Compare working tree against git ref |
 | `--state <dir>` | Check current state of directory |
+| `--strict` | Treat soft findings as hard in --state mode |
+| `--baseline <file>` | Baseline file for ratchet (default: <dir>/.archtour/baseline.json) |
+| `--exceptions <file>` | Exceptions file (default: <dir>/.archtour/exceptions.yml) |
 | `--max-files <n>` | Maximum candidate files to examine (default: 20000) |
 | `--migration-dir <path>` | Extra folder whose .sql files are migrations (repeatable) |
 | `--max-file-size <MB>` | Skip files larger than this (default: 5; Terraform plan JSON: 50) |
@@ -41,6 +44,10 @@ Architecture guardrails for a change (the CI gate).
 | `--rules <file>` | Custom rules file |
 | `--include-untracked` | Include untracked files with --changed-from |
 | `--cache-dir <dir>` | Directory to cache extracted facts |
+| `--override <rule>` | Override a soft finding (repeatable) |
+| `--override-by <user>` | Override author |
+| `--override-reason <text>` | Override reason |
+| `--override-sha <sha>` | Override commit SHA |
 | `--pr-author <user>` | PR author |
 | `--policy-from <base\|head>` | Base or head policy to use |
 | `--head-sha <sha>` | Head commit SHA |
@@ -95,6 +102,8 @@ Audit architectural violations across git commit history.
 |--------|--------------|
 | `--max-commits <n>` | Maximum commits to inspect (default: 200) |
 | `--since <date>` | Audit commits since date |
+| `--branch <name>` | Branch to audit (default: HEAD) |
+| `--repo-url <url>` | Git remote URL for link generation |
 | `--md` | Write markdown report to file (alias for --markdown) |
 | `--markdown <file>` | Write markdown report to file |
 | `--json` | Output machine-readable JSON |
@@ -115,3 +124,5 @@ List the architecture sources found and write a normalized spec JSON.
 | `--migration-dir <path>` | Extra folder whose .sql files are migrations (repeatable) |
 | `--max-file-size <MB>` | Skip files larger than this (default: 5; Terraform plan JSON: 50) |
 | `--max-nodes <n>` | Split large specs at n nodes (default: 15) |
+| `--max-depth <n>` | Maximum directory depth to walk (default: 12) |
+| `--no-split` | Do not split large specs into multiple files |

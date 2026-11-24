@@ -100,40 +100,12 @@ function checkOutExt(outPath, allowedExts) {
   return ext;
 }
 
-function parseArgs(argv) {
+function parseArgs(argv, command) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-o" || a === "--out") out.out = argv[++i];
-    else if (a === "--theme") out.theme = argv[++i];
-    else if (a === "--bg") out.bg = argv[++i];
-    else if (a === "--scale") out.scale = Number(argv[++i]);
-    else if (a === "--shot") out.shot = argv[++i];
-    else if (a === "--preset") out.preset = argv[++i];
-    else if (a === "--styles") out.styles = argv[++i];
-    else if (a === "--project") out.project = true;
-    else if (a === "--dark") out.dark = true;
-    else if (a === "--open") out.open = true;
-    else if (a === "--text") out.text = true;
-    else if (a === "--model") out.model = argv[++i];
-    else if (a === "--port") out.port = Number(argv[++i]);
-    else if (a === "--url") out.url = argv[++i];
-    else if (a === "--key") out.key = argv[++i];
-    else if (a === "--token") out.token = argv[++i];
-    else if (a === "--github") out.github = true;
-    else if (a === "--serve") out.serve = true;
-    else if (a === "--visibility") out.visibility = argv[++i];
-    else if (a === "--title") out.title = argv[++i];
-    else if (a === "--password") out.password = argv[++i];
-    else if (a === "--format") out.format = argv[++i];
     else if (a === "--strict") out.strict = true;
-    else if (a === "--ci") out.ci = true;
-    else if (a === "--no-brand") out.noBrand = true;
-    else if (a === "--from") out.from = argv[++i];
-    else if (a.startsWith("--from=")) out.from = a.slice("--from=".length);
-    else if (a === "--frames") out.frames = true;
-    else if (a === "--vtt") out.vtt = true;
-    else if (a === "--player") out.player = true;
     else if (a === "--json") out.json = true;
     else if (a === "--no-split") out.noSplit = true;
     else if (a === "--max-nodes") out.maxNodes = Number(argv[++i]);
@@ -176,42 +148,6 @@ function parseArgs(argv) {
       out.markdown = argv[++i];
     } else if (a.startsWith("--markdown=")) {
       out.markdown = a.slice("--markdown=".length);
-    } else if (a === "--server") {
-      out.server = argv[++i];
-    } else if (a.startsWith("--server=")) {
-      out.server = a.slice("--server=".length);
-    } else if (a === "--workspace") {
-      out.workspace = argv[++i];
-    } else if (a.startsWith("--workspace=")) {
-      out.workspace = a.slice("--workspace=".length);
-    } else if (a === "--repo") {
-      out.repo = argv[++i];
-    } else if (a.startsWith("--repo=")) {
-      out.repo = a.slice("--repo=".length);
-    } else if (a === "--sha") {
-      out.sha = argv[++i];
-    } else if (a.startsWith("--sha=")) {
-      out.sha = a.slice("--sha=".length);
-    } else if (a === "--branch") {
-      out.branch = argv[++i];
-    } else if (a.startsWith("--branch=")) {
-      out.branch = a.slice("--branch=".length);
-    } else if (a === "--pr") {
-      out.pr = argv[++i];
-    } else if (a.startsWith("--pr=")) {
-      out.pr = a.slice("--pr=".length);
-    } else if (a === "--spec") {
-      out.spec = argv[++i];
-    } else if (a.startsWith("--spec=")) {
-      out.spec = a.slice("--spec=".length);
-    } else if (a === "--summary-json") {
-      out.summaryJson = argv[++i];
-    } else if (a.startsWith("--summary-json=")) {
-      out.summaryJson = a.slice("--summary-json=".length);
-    } else if (a === "--summary") {
-      out.summary = argv[++i];
-    } else if (a.startsWith("--summary=")) {
-      out.summary = a.slice("--summary=".length);
     } else if (a === "--state") {
       if (i + 1 < argv.length && !argv[i + 1].startsWith("-")) {
         out.state = argv[++i];
@@ -278,6 +214,10 @@ function parseArgs(argv) {
       out.repoUrl = argv[++i];
     } else if (a.startsWith("--repo-url=")) {
       out.repoUrl = a.slice("--repo-url=".length);
+    } else if (a === "--branch") {
+      out.branch = argv[++i];
+    } else if (a.startsWith("--branch=")) {
+      out.branch = a.slice("--branch=".length);
     } else if (a === "--changed-from") {
       out.changedFrom = argv[++i];
     } else if (a.startsWith("--changed-from=")) {
@@ -298,6 +238,8 @@ function parseArgs(argv) {
       out.overrideSha = argv[++i];
     } else if (a.startsWith("--override-sha=")) {
       out.overrideSha = a.slice("--override-sha=".length);
+    } else if (a === "--version" || a === "-v") {
+      out.version = true;
     } else if (a === "--help" || a === "-h") {
       // Only flags set help here. A bare `help` is only a help request in the first position after the subcommand (see
       // isHelpRequest), never when it is an option value or a later positional.
@@ -305,6 +247,15 @@ function parseArgs(argv) {
     }
     else out._.push(a);
   }
+
+  // Reject unknown options before command-specific argument checks
+  for (const arg of out._) {
+    if (arg.startsWith("-") && arg !== "-") {
+      const cmd = command ? ` (run 'archtour help ${command}')` : " (run 'archtour help')";
+      die(`unknown option ${arg}${cmd}`, 3);
+    }
+  }
+
   return out;
 }
 
@@ -961,6 +912,9 @@ function printCheckHelp() {
   console.log("Options:");
   console.log("  --changed-from <ref>        Compare working tree against git ref");
   console.log("  --state <dir>               Check current state of directory");
+  console.log("  --strict                    Treat soft findings as hard in --state mode");
+  console.log("  --baseline <file>           Baseline file for ratchet (default: <dir>/.archtour/baseline.json)");
+  console.log("  --exceptions <file>         Exceptions file (default: <dir>/.archtour/exceptions.yml)");
   console.log("  --max-files <n>             Maximum candidate files to examine (default: 20000)");
   console.log("  --migration-dir <path>      Extra folder whose .sql files are migrations (repeatable)");
   console.log("  --max-file-size <MB>        Skip files larger than this (default: 5; Terraform plan JSON: 50)");
@@ -972,7 +926,10 @@ function printCheckHelp() {
   console.log("  --rules <file>              Custom rules file");
   console.log("  --include-untracked         Include untracked files with --changed-from");
   console.log("  --cache-dir <dir>           Directory to cache extracted facts");
-  console.log("  --override*, --override     Override soft findings (--override-by, --override-reason, --override-sha)");
+  console.log("  --override <rule>           Override a soft finding (repeatable)");
+  console.log("  --override-by <user>        Override author");
+  console.log("  --override-reason <text>    Override reason");
+  console.log("  --override-sha <sha>        Override commit SHA");
   console.log("  --pr-author <user>          PR author");
   console.log("  --policy-from <base|head>   Base or head policy to use");
   console.log("  --head-sha <sha>            Head commit SHA");
@@ -1016,13 +973,15 @@ function printChangesHelp() {
 }
 
 function printAuditHistoryHelp() {
-  console.log("usage: archtour audit-history [<repoDir>] [--max-commits <n>] [--since <date>] [--md <file>] [--json]");
+  console.log("usage: archtour audit-history [<repoDir>] [--max-commits <n>] [--since <date>] [--branch <name>] [--repo-url <url>] [--md <file>] [--json]");
   console.log("");
   console.log("Audit architectural violations across git commit history.");
   console.log("");
   console.log("Options:");
   console.log("  --max-commits <n>           Maximum commits to inspect (default: 200)");
   console.log("  --since <date>              Audit commits since date");
+  console.log("  --branch <name>             Branch to audit (default: HEAD)");
+  console.log("  --repo-url <url>            Git remote URL for link generation");
   console.log("  --md, --markdown <file>     Write markdown report to file");
   console.log("  --json                      Output machine-readable JSON");
 }
@@ -1041,6 +1000,8 @@ function printScanHelp() {
   console.log("  --migration-dir <path>      Extra folder whose .sql files are migrations (repeatable)");
   console.log("  --max-file-size <MB>        Skip files larger than this (default: 5; Terraform plan JSON: 50)");
   console.log("  --max-nodes <n>             Split large specs at n nodes (default: 15)");
+  console.log("  --max-depth <n>             Maximum directory depth to walk (default: 12)");
+  console.log("  --no-split                  Do not split large specs into multiple files");
 }
 
 // A run is a help request only when help sits in an option position: --help/-h seen by parseArgs as a flag, the leading
@@ -1053,13 +1014,23 @@ function isHelpRequest(cmd, rest, opts) {
   return rest[0] === "help";
 }
 
+function detectCommand(argv) {
+  const commands = new Set(["check", "baseline", "audit-history", "facts", "changes", "scan", "help", "version"]);
+  for (const arg of argv) {
+    if (commands.has(arg)) return arg;
+  }
+  return null;
+}
+
 async function main() {
-  const [cmd, ...rest] = process.argv.slice(2);
-  if (cmd === "--version" || cmd === "-v" || cmd === "version") {
+  const argv = process.argv.slice(2);
+  const cmd = detectCommand(argv);
+  if (cmd === "version" || (cmd === null && (argv[0] === "--version" || argv[0] === "-v"))) {
     console.log(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
     return;
   }
-  const opts = parseArgs(rest);
+  const rest = argv.filter(a => a !== cmd);
+  const opts = parseArgs(rest, cmd);
 
   const isHelp = isHelpRequest(cmd, rest, opts);
   if (isHelp) {
@@ -1071,6 +1042,10 @@ async function main() {
     if (helpTarget === "audit-history") { printAuditHistoryHelp(); return; }
     if (helpTarget === "scan") { printScanHelp(); return; }
     printUsage();
+    return;
+  }
+  if (opts.version) {
+    console.log(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
     return;
   }
   if (opts.maxFileSize !== undefined) {

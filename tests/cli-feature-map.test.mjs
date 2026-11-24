@@ -121,37 +121,28 @@ function getAllParserFlags() {
       const flag = m[1];
       if (flag.length > 2 && flag !== "undefined") flags.add(flag);
     }
+    const shortFlagMatches = line.matchAll(/(^|\s)(-[a-zA-Z])(?:\s|\||=|,|$|'|")/g);
+    for (const m of shortFlagMatches) {
+      const flag = m[2];
+      if (flag.length === 2) flags.add(flag);
+    }
+    const shortFlagEqMatches = line.matchAll(/===?\s*"(-[a-zA-Z])"/g);
+    for (const m of shortFlagEqMatches) {
+      flags.add(m[1]);
+    }
   }
-  const manualFlags = [
-    "--out", "--theme", "--bg", "--scale", "--shot", "--preset", "--styles", "--project",
-    "--dark", "--open", "--text", "--model", "--port", "--url", "--key", "--token",
-    "--github", "--serve", "--visibility", "--title", "--password", "--format", "--strict",
-    "--ci", "--no-brand", "--from", "--frames", "--vtt", "--player", "--json", "--no-split",
-    "--max-nodes", "--max-files", "--migration-dir", "--max-file-size", "--max-depth",
-    "--render-helm", "--helm-bin", "--include-tests", "--ignore", "--rules", "--md",
-    "--markdown", "--server", "--workspace", "--repo", "--sha", "--branch", "--pr",
-    "--spec", "--summary-json", "--summary", "--state", "--baseline", "--exceptions",
-    "--override", "--override-by", "--override-permission", "--override-reason",
-    "--owner-teams", "--now", "--policy-from", "--max-commits", "--since", "--repo-url",
-    "--changed-from", "--cache-dir", "--include-untracked", "--head-sha", "--log-all",
-    "--override-sha", "--help"
-  ];
-  for (const f of manualFlags) flags.add(f);
   return flags;
 }
 
-const INTERNAL_FLAGS = new Set([
-  "-o", "--out",
-  "--theme", "--bg", "--scale", "--shot", "--preset", "--styles", "--project",
-  "--dark", "--open", "--text", "--model", "--port", "--url", "--key", "--token",
-  "--github", "--serve", "--visibility", "--title", "--password", "--format",
-  "--frames", "--vtt", "--player", "--no-split", "--max-depth",
-  "--server", "--workspace", "--repo", "--sha", "--branch", "--pr", "--spec",
-  "--summary-json", "--summary", "--owner-teams", "--now", "--repo-url",
-  "--override-permission", "--baseline", "--exceptions",
-  "--override", "--override-by", "--override-reason", "--override-sha",
-  "-h", "--help", "--from", "--strict", "--ci", "--no-brand",
-  "--version", "-v",
+const INTERNAL_FLAGS = new Map([
+  ["-o", "short form of --out"],
+  ["--now", "fixed clock for tests"],
+  ["--owner-teams", "passed by action.yml"],
+  ["--override-permission", "passed by action.yml"],
+  ["-h", "help"],
+  ["--help", "help"],
+  ["-v", "version"],
+  ["--version", "version"],
 ]);
 
 describe("CLI feature map test", () => {
@@ -183,7 +174,7 @@ describe("CLI feature map test", () => {
       for (const opt of helpOptions) {
         assert.ok(
           docsOpts.has(opt),
-          `--${opt} is in "help ${cmd}" but not in docs/CLI.md under ## ${cmd} -> add it to the ${cmd} table`
+          `${opt} is in "help ${cmd}" but not in docs/CLI.md under ## ${cmd} -> add it to the ${cmd} table`
         );
       }
     }
@@ -201,7 +192,7 @@ describe("CLI feature map test", () => {
       for (const opt of docsOpts) {
         assert.ok(
           helpOptions.has(opt),
-          `--${opt} is in docs/CLI.md under ## ${cmd} but not in "help ${cmd}" -> remove it from the ${cmd} table or add to help`
+          `${opt} is in docs/CLI.md under ## ${cmd} but not in "help ${cmd}" -> remove it from the ${cmd} table or add to help`
         );
       }
     }
@@ -221,8 +212,49 @@ describe("CLI feature map test", () => {
       if (INTERNAL_FLAGS.has(flag)) continue;
       assert.ok(
         allHelpOptions.has(flag),
-        `--${flag} is parsed in tools/cli.mjs but does not appear in any "help <command>" output -> add it to the relevant command's help or add to INTERNAL_FLAGS with a reason`
+        `${flag} is parsed in tools/cli.mjs but does not appear in any "help <command>" output -> add it to the relevant command's help or add to INTERNAL_FLAGS with a reason`
       );
+    }
+  });
+
+  test("every INTERNAL_FLAGS key is really parsed by tools/cli.mjs", () => {
+    const parserFlags = getAllParserFlags();
+    for (const [flag, reason] of INTERNAL_FLAGS) {
+      assert.ok(
+        parserFlags.has(flag),
+        `INTERNAL_FLAGS entry ${flag} ("${reason}") is not parsed by tools/cli.mjs -> remove it from INTERNAL_FLAGS`
+      );
+    }
+  });
+
+  test("no command's docs table lists the same option twice", () => {
+    const docsContent = readFileSync(DOCS_PATH, "utf8");
+    const docsOptions = parseOptionsFromDocs(docsContent);
+    for (const [cmd, options] of docsOptions) {
+      const seen = new Set();
+      const lines = docsContent.split("\n");
+      let currentCommand = null;
+      for (const line of lines) {
+        const cmdMatch = line.match(/^##\s+(\w+(?:-\w+)?)/);
+        if (cmdMatch) {
+          currentCommand = cmdMatch[1];
+          continue;
+        }
+        if (currentCommand === cmd && line.trim().startsWith("|")) {
+          const cells = line.split("|").map(c => c.trim()).filter(c => c);
+          if (cells.length >= 2 && cells[0].startsWith("`--")) {
+            const optMatch = cells[0].match(/`(--[\w-]+)(?:\s|`)/);
+            if (optMatch) {
+              const opt = optMatch[1];
+              assert.ok(
+                !seen.has(opt),
+                `${cmd} table in docs/CLI.md lists ${opt} more than once`
+              );
+              seen.add(opt);
+            }
+          }
+        }
+      }
     }
   });
 });
