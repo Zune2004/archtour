@@ -1014,23 +1014,26 @@ function isHelpRequest(cmd, rest, opts) {
   return rest[0] === "help";
 }
 
+const COMMANDS = new Set(["check", "baseline", "audit-history", "facts", "changes", "scan", "help", "version"]);
+
+// Only names the command in an unknown-option error; the command itself is always the first argument.
 function detectCommand(argv) {
-  const commands = new Set(["check", "baseline", "audit-history", "facts", "changes", "scan", "help", "version"]);
-  for (const arg of argv) {
-    if (commands.has(arg)) return arg;
-  }
-  return null;
+  return argv.find((arg) => COMMANDS.has(arg)) || null;
 }
 
 async function main() {
   const argv = process.argv.slice(2);
-  const cmd = detectCommand(argv);
-  if (cmd === "version" || (cmd === null && (argv[0] === "--version" || argv[0] === "-v"))) {
+  // The command is the first argument and nothing else is removed, so a value spelled like a command
+  // (`--md check`, a folder named `facts`) stays a value.
+  const [cmd, ...rest] = argv;
+  if (cmd === "--version" || cmd === "-v" || cmd === "version") {
     console.log(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
     return;
   }
-  const rest = argv.filter(a => a !== cmd);
-  const opts = parseArgs(rest, cmd);
+  const helpCmd = COMMANDS.has(cmd) ? cmd : detectCommand(argv);
+  // An option before the command (`--x 1 check ...`): an unknown one is reported against the command named later.
+  if (cmd && cmd.startsWith("-") && cmd !== "--help" && cmd !== "-h") parseArgs(argv, helpCmd);
+  const opts = parseArgs(rest, helpCmd);
 
   const isHelp = isHelpRequest(cmd, rest, opts);
   if (isHelp) {
@@ -1044,10 +1047,8 @@ async function main() {
     printUsage();
     return;
   }
-  if (opts.version) {
-    console.log(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
-    return;
-  }
+  // `-v` after a command is not "verbose": printing the version there would skip the check and exit 0.
+  if (opts.version) die("--version and -v must be the only argument (run 'archtour --version')", 3);
   if (opts.maxFileSize !== undefined) {
     if (!Number.isFinite(opts.maxFileSize) || opts.maxFileSize <= 0 || opts.maxFileSize > 1024) {
       die("--max-file-size must be a number of MB between 0 and 1024", 3);
