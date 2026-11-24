@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-24
+
+### Changed
+- **Unknown options are an error:** `archtour` now fails with exit 3 and
+  `unknown option --x (run 'archtour help <command>')` for an option it does not know. Before, about 30 options left
+  from the diagram toolkit (for example `--token`, `--password`, `--theme`, `--port`) were accepted and silently
+  ignored, and so was a mistyped option. If a script or workflow passes one of them, remove it.
+- **`-v` / `--version` only as the first argument:** `archtour --version` prints the version as before; after a
+  command (`archtour check base head -v`) it is now a usage error (exit 3) instead of being ignored.
+
+### Added
+- **CLI reference:** `docs/CLI.md` lists every command and option, with a section for coding agents. Options that
+  worked but were missing from `help` are now listed there and in `docs/CLI.md`: `check --strict`, `--baseline`,
+  `--exceptions`; `scan --max-depth`, `--no-split`; `audit-history --branch`, `--repo-url`.
+
 ## [0.3.1] - 2026-11-23
 
 ### Removed
