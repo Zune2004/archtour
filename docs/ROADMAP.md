@@ -17,6 +17,17 @@ Archtour is **one required check that blocks breaking database and API contract 
 - **Audit-history:** Fast repository history inspection (`archtour audit-history`) evaluating past commits for architectural changes.
 - **Fast path:** Git-integrated candidate discovery (`--changed-from <ref>`) and content-addressed facts caching (`--cache-dir`) keyed by git blob SHA, skipping full-tree walks on large codebases.
 
+### Releases since (CHANGELOG.md has the details)
+- **0.3.0 (2026-11-20):** first npm release of the guardrails-only package; the diagram toolkit moved to its own repo.
+- **0.3.1 (2026-11-23):** Helm charts rendered with `helm template` (values from `.archtour/helm.yml` or `ci/*-values.yaml`,
+  read from the base branch); irreversible SQL (`DROP SCHEMA`, `DROP DATABASE`, `TRUNCATE`, `DELETE` without `WHERE`);
+  override owners must own every merged rule; `audit-history` gives the same result as `check` for each past commit.
+- **0.3.2 (2026-11-24):** unknown options fail with exit 3 (about 30 dead diagram-toolkit flags removed);
+  `docs/CLI.md` lists every command and option.
+- **0.3.3 (2026-11-24):** needs-human gate for agent-written PRs (`needsHuman` in `--json`, a report line, Action
+  outputs `needs-human`/`needs-human-reasons`/`verdict`, optional `needs-human-label`; fails closed when the check does
+  not finish) and agent output mode (`--brief`, `--only`, `--limit`/`--offset`).
+
 ### What is explicitly NOT planned
 - **Module and import-boundary rules:** No language-level layer or import graph linting (TypeScript, JavaScript, Python, Go, Java, C#). Use existing specialized tools instead:
   - TypeScript/JavaScript: `dependency-cruiser`, `eslint-plugin-boundaries`, Nx `enforce-module-boundaries`
@@ -26,7 +37,11 @@ Archtour is **one required check that blocks breaking database and API contract 
 - **More infrastructure rules:** No competition with broad IaC scanners (Checkov, Trivy, kube-linter, Conftest/OPA). Archtour stays focused on contract safety and high-severity destructive changes.
 
 ### Next
-- **Adapter mode (only after design-partner signal):** Ingest JSON outputs from specialized linters (Squawk for deep Postgres migration linting, oasdiff for 250+ OpenAPI rules, `buf breaking` for Protobuf) as events into Archtour's governance engine (one required check, team ownership, expiring exceptions, and debt ratchet). This will only be explored after user validation from design partners.
+- **0.4.0, adapter mode (owner decision Q23):** read the JSON output of specialised linters (Squawk for deep Postgres
+  migration linting, oasdiff for OpenAPI, then `buf breaking` for Protobuf) as findings in Archtour's gate, so they get
+  the same owners, overrides, expiring exceptions, debt ratchet and audit trail.
+- **After 0.4.0:** folder import-boundary rules by reading dependency-cruiser output rather than a new parser (owner
+  decision Q34); an override/audit log export; publishing the measured precision; a clickable demo repository.
 
 ---
 
