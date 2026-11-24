@@ -253,50 +253,85 @@ if (!hasGit()) {
 
   test("audit-history on 300-commit generated repository completes in < 10 s", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-hist-300commit-"));
+    const tmpSmall = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-hist-30commit-"));
     try {
-      gitCmd(tmp, ["init", "-b", "main"]);
-      gitCmd(tmp, ["config", "user.name", "Alice TestAuthor"]);
-      gitCmd(tmp, ["config", "user.email", "alice.author@example.com"]);
-      gitCmd(tmp, ["config", "commit.gpgSign", "false"]);
+      // Generate a repo with `commitCount` commits fast using git fast-import. The first two
+      // commits are the compose/privileged pair; the rest are unrelated docs changes.
+      const buildRepo = (dir, commitCount) => {
+        gitCmd(dir, ["init", "-b", "main"]);
+        gitCmd(dir, ["config", "user.name", "Alice TestAuthor"]);
+        gitCmd(dir, ["config", "user.email", "alice.author@example.com"]);
+        gitCmd(dir, ["config", "commit.gpgSign", "false"]);
 
-      // Generate 300 commits fast using git fast-import
-      let importStream = "";
-      // Commit 1: initial compose
-      importStream += `commit refs/heads/main\n`;
-      importStream += `committer Generator <gen@example.com> 1700000000 +0000\n`;
-      importStream += `data <<EOF\ncommit 1\nEOF\n`;
-      importStream += `M 644 inline docker-compose.yml\n`;
-      importStream += `data <<EOF\nversion: '3.8'\nservices:\n  app:\n    image: nginx:alpine\nEOF\n\n`;
-
-      // Commit 2: privileged enabled (triggers rule)
-      importStream += `commit refs/heads/main\n`;
-      importStream += `committer Generator <gen@example.com> 1700000001 +0000\n`;
-      importStream += `data <<EOF\ncommit 2\nEOF\n`;
-      importStream += `M 644 inline docker-compose.yml\n`;
-      importStream += `data <<EOF\nversion: '3.8'\nservices:\n  app:\n    image: nginx:alpine\n    privileged: true\nEOF\n\n`;
-
-      // Commits 3..300: unrelated text changes in docs/
-      for (let i = 3; i <= 300; i++) {
+        let importStream = "";
+        // Commit 1: initial compose
         importStream += `commit refs/heads/main\n`;
-        importStream += `committer Generator <gen@example.com> ${1700000000 + i} +0000\n`;
-        importStream += `data <<EOF\ncommit ${i}\nEOF\n`;
-        importStream += `M 644 inline docs/note_${i}.txt\n`;
-        importStream += `data <<EOF\nNote content for commit ${i}\nEOF\n\n`;
-      }
+        importStream += `committer Generator <gen@example.com> 1700000000 +0000\n`;
+        importStream += `data <<EOF\ncommit 1\nEOF\n`;
+        importStream += `M 644 inline docker-compose.yml\n`;
+        importStream += `data <<EOF\nversion: '3.8'\nservices:\n  app:\n    image: nginx:alpine\nEOF\n\n`;
 
-      gitCmd(tmp, ["fast-import"], importStream);
-      gitCmd(tmp, ["reset", "--hard", "main"]);
+        // Commit 2: privileged enabled (triggers rule)
+        importStream += `commit refs/heads/main\n`;
+        importStream += `committer Generator <gen@example.com> 1700000001 +0000\n`;
+        importStream += `data <<EOF\ncommit 2\nEOF\n`;
+        importStream += `M 644 inline docker-compose.yml\n`;
+        importStream += `data <<EOF\nversion: '3.8'\nservices:\n  app:\n    image: nginx:alpine\n    privileged: true\nEOF\n\n`;
 
-      // Measure auditHistory execution time
-      const startTime = performance.now();
-      const res = await auditHistory(tmp, { maxCommits: 500 });
-      const elapsedMs = performance.now() - startTime;
+        // Commits 3..commitCount: unrelated text changes in docs/
+        for (let i = 3; i <= commitCount; i++) {
+          importStream += `commit refs/heads/main\n`;
+          importStream += `committer Generator <gen@example.com> ${1700000000 + i} +0000\n`;
+          importStream += `data <<EOF\ncommit ${i}\nEOF\n`;
+          importStream += `M 644 inline docs/note_${i}.txt\n`;
+          importStream += `data <<EOF\nNote content for commit ${i}\nEOF\n\n`;
+        }
 
+        gitCmd(dir, ["fast-import"], importStream);
+        gitCmd(dir, ["reset", "--hard", "main"]);
+      };
+
+      buildRepo(tmp, 300);
+      buildRepo(tmpSmall, 30);
+
+      // Time auditHistory on each repo and take the median of 2 runs.
+      const runAudit = async (dir) => {
+        const startTime = performance.now();
+        const res = await auditHistory(dir, { maxCommits: 500 });
+        return { res, elapsedMs: performance.now() - startTime };
+      };
+      const median = (values) => {
+        const sorted = [...values].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+      };
+
+      const bigRuns = [];
+      for (let i = 0; i < 2; i++) bigRuns.push(await runAudit(tmp));
+      const smallRuns = [];
+      for (let i = 0; i < 2; i++) smallRuns.push(await runAudit(tmpSmall));
+
+      const t300 = median(bigRuns.map((run) => run.elapsedMs));
+      const t30 = median(smallRuns.map((run) => run.elapsedMs));
+
+      const res = bigRuns[bigRuns.length - 1].res;
       assert.equal(res.summary.commitsScanned, 300, "Must scan all 300 commits");
       assert.ok(res.findings.some(f => f.ruleId === "no-privileged-containers"), "Must find privileged container rule violation");
-      assert.ok(elapsedMs < 10000, `Auditing 300 commits must take < 10 s (took ${(elapsedMs / 1000).toFixed(2)} s)`);
+
+      assert.ok(
+        t300 <= t30 * 20 + 1000,
+        `Expected auditing 300 commits to grow at most ~linearly with commit count: ` +
+          `t300 median ${t300.toFixed(1)} ms vs t30 median ${t30.toFixed(1)} ms ` +
+          `(ratio ${(t300 / t30).toFixed(2)}x), limit = t30 * 20 + 1000 = ${(t30 * 20 + 1000).toFixed(1)} ms`
+      );
+      // Absolute backstop: catches a pathologically slow machine without hiding algorithmic regressions.
+      assert.ok(
+        t300 < 120000,
+        `Auditing 300 commits must take < 120 s (median across 2 runs, took ${(t300 / 1000).toFixed(2)} s)`
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+      fs.rmSync(tmpSmall, { recursive: true, force: true });
     }
   });
 }

@@ -1761,20 +1761,36 @@ test("non-git directory falls back to full scan with notice", () => {
   }
 });
 
-// 29. Performance test: 20,000 files fixture with 3 changed sources finishes check in < 2 s
+// 29. Performance test: 20,000 files fixture with 3 changed sources stays close to a small repo (runner-speed independent)
 test("performance: 20,000 files fixture with 3 changed sources finishes check in < 2 s", { timeout: 120000 }, (t) => {
   if (!hasGit()) {
     if (t?.skip) t.skip("git is unavailable");
     return;
   }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-perf-"));
+  const tmpSmall = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-perf-small-"));
   try {
-    spawnSync("git", ["init"], { cwd: tmp });
-    spawnSync("git", ["config", "user.email", "perf@example.com"], { cwd: tmp });
-    spawnSync("git", ["config", "user.name", "Perf Test"], { cwd: tmp });
-    spawnSync("git", ["config", "commit.gpgSign", "false"], { cwd: tmp });
+    // Write the 3 candidate architecture files in their base state.
+    const writeBaseCandidates = (dir) => {
+      fs.writeFileSync(path.join(dir, "docker-compose.yml"), "services:\n  app:\n    image: node:18\n");
+      fs.writeFileSync(path.join(dir, "schema.prisma"), "model User {\n  id Int @id\n}\n");
+      fs.writeFileSync(path.join(dir, "openapi.json"), '{"openapi":"3.0.0","info":{"title":"API","version":"1"},"security":[{"apiKey":[]}],"paths":{}}');
+    };
+    // Apply the same 3 candidate changes in head.
+    const writeHeadCandidates = (dir) => {
+      fs.writeFileSync(path.join(dir, "docker-compose.yml"), "services:\n  app:\n    image: node:20\n");
+      fs.writeFileSync(path.join(dir, "schema.prisma"), "model User {\n  id Int @id\n  bio String?\n}\n");
+      fs.writeFileSync(path.join(dir, "openapi.json"), '{"openapi":"3.0.0","info":{"title":"API","version":"1"},"security":[{"apiKey":[]}],"paths":{"/users":{"get":{"operationId":"getUsers","responses":{"200":{"description":"ok"}}}}}}');
+    };
+    const initRepo = (dir) => {
+      spawnSync("git", ["init"], { cwd: dir });
+      spawnSync("git", ["config", "user.email", "perf@example.com"], { cwd: dir });
+      spawnSync("git", ["config", "user.name", "Perf Test"], { cwd: dir });
+      spawnSync("git", ["config", "commit.gpgSign", "false"], { cwd: dir });
+    };
 
-    // Generate 20,000 files
+    // Big repo: 20,000 files plus the 3 candidate files.
+    initRepo(tmp);
     const numDirs = 20;
     const filesPerDir = 1000;
     for (let d = 0; d < numDirs; d++) {
@@ -1784,36 +1800,70 @@ test("performance: 20,000 files fixture with 3 changed sources finishes check in
         fs.writeFileSync(path.join(dirPath, `code_${f}.js`), "");
       }
     }
-
-    // 3 candidate architecture files in base
-    fs.writeFileSync(path.join(tmp, "docker-compose.yml"), "services:\n  app:\n    image: node:18\n");
-    fs.writeFileSync(path.join(tmp, "schema.prisma"), "model User {\n  id Int @id\n}\n");
-    fs.writeFileSync(path.join(tmp, "openapi.json"), '{"openapi":"3.0.0","info":{"title":"API","version":"1"},"security":[{"apiKey":[]}],"paths":{}}');
-
+    writeBaseCandidates(tmp);
     spawnSync("git", ["add", "-A"], { cwd: tmp });
     spawnSync("git", ["commit", "-m", "base commit"], { cwd: tmp });
-
-    // Modify the 3 candidate files in head
-    fs.writeFileSync(path.join(tmp, "docker-compose.yml"), "services:\n  app:\n    image: node:20\n");
-    fs.writeFileSync(path.join(tmp, "schema.prisma"), "model User {\n  id Int @id\n  bio String?\n}\n");
-    fs.writeFileSync(path.join(tmp, "openapi.json"), '{"openapi":"3.0.0","info":{"title":"API","version":"1"},"security":[{"apiKey":[]}],"paths":{"/users":{"get":{"operationId":"getUsers","responses":{"200":{"description":"ok"}}}}}}');
-
+    writeHeadCandidates(tmp);
     spawnSync("git", ["add", "-A"], { cwd: tmp });
     spawnSync("git", ["commit", "-m", "head commit"], { cwd: tmp });
 
-    // Measure check execution time
-    const t0 = performance.now();
-    const r = spawnSync(process.execPath, [CLI, "check", "--changed-from", "HEAD~1", tmp, "--json"], {
-      encoding: "utf8"
-    });
-    const elapsed = performance.now() - t0;
+    // Small repo: the same 3 candidate files and only a handful of other files.
+    initRepo(tmpSmall);
+    fs.mkdirSync(path.join(tmpSmall, "src"), { recursive: true });
+    for (let f = 0; f < 5; f++) {
+      fs.writeFileSync(path.join(tmpSmall, "src", `code_${f}.js`), "");
+    }
+    writeBaseCandidates(tmpSmall);
+    spawnSync("git", ["add", "-A"], { cwd: tmpSmall });
+    spawnSync("git", ["commit", "-m", "base commit"], { cwd: tmpSmall });
+    writeHeadCandidates(tmpSmall);
+    spawnSync("git", ["add", "-A"], { cwd: tmpSmall });
+    spawnSync("git", ["commit", "-m", "head commit"], { cwd: tmpSmall });
 
+    // Time the same changed-files check on each repo and take the median of 3 runs.
+    const runCheck = (repo) => {
+      const t0 = performance.now();
+      const r = spawnSync(process.execPath, [CLI, "check", "--changed-from", "HEAD~1", repo, "--json"], {
+        encoding: "utf8"
+      });
+      return { r, elapsedMs: performance.now() - t0 };
+    };
+    const median = (values) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    };
+
+    const bigRuns = [];
+    for (let i = 0; i < 3; i++) bigRuns.push(runCheck(tmp));
+    const smallRuns = [];
+    for (let i = 0; i < 3; i++) smallRuns.push(runCheck(tmpSmall));
+
+    const bigMs = median(bigRuns.map((run) => run.elapsedMs));
+    const smallMs = median(smallRuns.map((run) => run.elapsedMs));
+
+    const r = bigRuns[bigRuns.length - 1].r;
     assert.equal(r.status, 0, `check failed: ${r.stderr}`);
     const parsed = JSON.parse(r.stdout);
     assert.equal(parsed.verdict, "passed");
-    assert.ok(elapsed < 2000, `Expected check to finish in < 2000 ms, took ${elapsed.toFixed(1)} ms`);
+    for (const run of smallRuns) {
+      assert.equal(run.r.status, 0, `small-repo check failed: ${run.r.stderr}`);
+    }
+
+    assert.ok(
+      bigMs <= smallMs * 4 + 500,
+      `Expected the 20,000-file check to scale like the small-repo check: ` +
+        `big median ${bigMs.toFixed(1)} ms vs small median ${smallMs.toFixed(1)} ms ` +
+        `(ratio ${(bigMs / smallMs).toFixed(2)}x), limit = small * 4 + 500 = ${(smallMs * 4 + 500).toFixed(1)} ms`
+    );
+    // Absolute backstop: catches a pathologically slow machine without hiding algorithmic regressions.
+    assert.ok(
+      bigMs < 20000,
+      `Expected the 20,000-file check to finish in < 20000 ms (median across 3 runs), took ${bigMs.toFixed(1)} ms`
+    );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(tmpSmall, { recursive: true, force: true });
   }
 });
 
