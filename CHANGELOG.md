@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-27
+
+### Added
+- **Import dependency-cruiser results:** `--import depcruise:<file>` (and the Action's `import` input) reads
+  `depcruise --output-type json`, so folder and module boundary rules ("src/ui must not import src/db") go through
+  the same gate as the other imported tools. Each entry in `summary.violations` becomes a finding such as
+  `depcruise/no-ui-to-db`: `error` is `soft`, `warn` is `warn`, `info` is `advisory`, and known violations
+  (severity `ignore`, from `--ignore-known`) are skipped. Exception targets are `<from> -> <to>`, the whole cycle
+  for cycles, or the file. A file without `summary.violations`, or with a malformed or unknown violation, exits 3.
+  docs/GUARDRAILS.md section 7 shows a CI step that runs a full cruise with the base branch's config and
+  known-violations file.
+- **`linter-config-changed`:** with `--import <tool>`, a PR that changes that tool's own config or known-violations
+  file (`.dependency-cruiser.*`, `.dependency-cruiser-known-violations.json`, `.squawk.toml`, `buf.yaml`,
+  `buf.work.yaml`) gets a soft finding and a needs-human reason, so it cannot silence its own violations.
+- A rule for an imported id or `<tool>/*` may set `owners` without `level`; the finding keeps its mapped level.
+
+### Fixed
+- Long `check --json` output was cut off when piped on Linux and macOS: the CLI now waits for stdout before exiting.
+
 ## [0.4.0] - 2026-11-27
 
 ### Added
