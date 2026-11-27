@@ -7,7 +7,7 @@
 | 0 | OK |
 | 1 | Hard finding (blocking) |
 | 2 | Soft finding (warning) |
-| 3 | Config or usage error |
+| 3 | Config or usage error (prints message on stderr, nothing on stdout, also with `--json`) |
 
 ## For agents
 
@@ -33,6 +33,8 @@ Architecture guardrails for a change (the CI gate).
 | `--baseline <file>` | Baseline file for ratchet (default: <dir>/.archtour/baseline.json) |
 | `--exceptions <file>` | Exceptions file (default: <dir>/.archtour/exceptions.yml) |
 | `--max-files <n>` | Maximum candidate files to examine (default: 20000) |
+| `--ignore <glob>` | Path or folder to ignore (repeatable) |
+| `--include-tests` | Scan test, fixture and example directories |
 | `--migration-dir <path>` | Extra folder whose .sql files are migrations (repeatable) |
 | `--max-file-size <MB>` | Skip files larger than this (default: 5; Terraform plan JSON: 50) |
 | `--render-helm <mode>` | Render Helm charts: auto\|on\|off (default: auto) |

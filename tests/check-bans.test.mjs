@@ -185,3 +185,61 @@ test("j. runtime-deps: extra left-pad dependency via ARCHTOUR_BANS_PACKAGE", () 
     cleanup(pkgDir);
   }
 });
+
+test("k1. fetch inside /* block comment */ -> no hit", () => {
+  const dir = makeFixture('/* fetch("x") */ const a = 1;\n');
+  try {
+    const result = runScript(dir);
+    assert.strictEqual(result.status, 0);
+    assert.match(result.stdout, /check-bans: ok/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("k2. fetch after /* block comment */ on same line -> hit on that line", () => {
+  const dir = makeFixture('/* note */ fetch("x");\n');
+  try {
+    const result = runScript(dir);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stdout, /rules\.mjs:1: no-network/);
+    assert.match(result.stdout, /->/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("k3. fetch inside multi-line block comment -> no hit", () => {
+  const dir = makeFixture('/* line 1\n   line 2 */\nfetch("x");\n');
+  try {
+    const result = runScript(dir);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stdout, /rules\.mjs:3: no-network/);
+    assert.match(result.stdout, /->/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("k4. fetch inside string literal -> hit (current behaviour, no string parser)", () => {
+  const dir = makeFixture('"see fetch() docs";\n');
+  try {
+    const result = runScript(dir);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stdout, /rules\.mjs:1: no-network/);
+    assert.match(result.stdout, /->/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("k5. fetch inside // line comment -> no hit", () => {
+  const dir = makeFixture('// fetch("x");\n');
+  try {
+    const result = runScript(dir);
+    assert.strictEqual(result.status, 0);
+    assert.match(result.stdout, /check-bans: ok/);
+  } finally {
+    cleanup(dir);
+  }
+});

@@ -33,28 +33,60 @@ const WRITE_CALL_RE = new RegExp("\\b(" + WRITE_CALLS.join("|") + ")\\b\\(");
 
 function stripComments(text) {
   const lines = text.split("\n");
-  const out = [];
-  let block = false;
-  for (const line of lines) {
+  const out = new Array(lines.length).fill("");
+  let inBlock = false;
+
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
     let i = 0;
     let cur = "";
+
     while (i < line.length) {
-      if (block) {
+      if (inBlock) {
         const end = line.indexOf("*/", i);
-        if (end === -1) { i = line.length; break; }
-        i = end + 2;
-        block = false;
+        if (end === -1) {
+          i = line.length;
+        } else {
+          i = end + 2;
+          inBlock = false;
+        }
       } else {
         const slash = line.indexOf("//", i);
         const star = line.indexOf("/*", i);
-        const next = slash === -1 ? (star === -1 ? Infinity : star) : star === -1 ? slash : Math.min(slash, star);
-        if (next === Infinity) { cur += line.slice(i); i = line.length; }
-        else if (star === -1 || slash <= star) { cur += line.slice(i, slash); i = line.length; }
-        else { cur += line.slice(i, star); i = star + 2; block = true; }
+
+        let next = -1;
+        let isLineComment = false;
+        let isBlockComment = false;
+
+        if (slash !== -1 && star !== -1) {
+          next = Math.min(slash, star);
+          isLineComment = slash <= star;
+          isBlockComment = star < slash;
+        } else if (slash !== -1) {
+          next = slash;
+          isLineComment = true;
+        } else if (star !== -1) {
+          next = star;
+          isBlockComment = true;
+        } else {
+          cur += line.slice(i);
+          break;
+        }
+
+        cur += line.slice(i, next);
+
+        if (isLineComment) {
+          break;
+        } else if (isBlockComment) {
+          i = next + 2;
+          inBlock = true;
+        }
       }
     }
-    out.push(cur);
+
+    out[lineIdx] = cur;
   }
+
   return out;
 }
 

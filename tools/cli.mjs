@@ -219,8 +219,14 @@ function checkOutExt(outPath, allowedExts) {
 
 function parseArgs(argv, command) {
   const out = { _: [] };
+  // Everything after `--` is positional, also names that start with "-"; added after the unknown-option check below.
+  const afterDashDash = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === "--") {
+      afterDashDash.push(...argv.slice(i + 1));
+      break;
+    }
     if (a === "-o" || a === "--out") out.out = argv[++i];
     else if (a === "--strict") out.strict = true;
     else if (a === "--json") out.json = true;
@@ -386,6 +392,7 @@ function parseArgs(argv, command) {
       die(`unknown option ${arg}${cmd}`, 3);
     }
   }
+  out._.push(...afterDashDash);
 
   return out;
 }
@@ -1119,6 +1126,8 @@ function printCheckHelp() {
   console.log("  --baseline <file>           Baseline file for ratchet (default: <dir>/.archtour/baseline.json)");
   console.log("  --exceptions <file>         Exceptions file (default: <dir>/.archtour/exceptions.yml)");
   console.log("  --max-files <n>             Maximum candidate files to examine (default: 20000)");
+  console.log("  --ignore <glob>             Path or folder to ignore (repeatable)");
+  console.log("  --include-tests             Scan test, fixture and example directories");
   console.log("  --migration-dir <path>      Extra folder whose .sql files are migrations (repeatable)");
   console.log("  --max-file-size <MB>        Skip files larger than this (default: 5; Terraform plan JSON: 50)");
   console.log("  --render-helm <mode>        Render Helm charts: auto|on|off (default: auto)");
