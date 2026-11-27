@@ -1230,6 +1230,9 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
 
   policyCleanup();
   headPolicyCleanup();
+  // Writes to a pipe are asynchronous on Linux and macOS: exiting at once cut long --json output short. Wait until
+  // stdout has taken everything written so far.
+  await new Promise((resolve) => process.stdout.write("", resolve));
   process.exit(exitCode);
 }
 
