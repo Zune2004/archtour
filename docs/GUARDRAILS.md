@@ -374,6 +374,8 @@ Imported rule ids are `<tool>/<id>` (`squawk/ban-drop-column`, `oasdiff/api-path
 
 Add a rule with the imported id (no `on` field is needed) or a `<tool>/*` wildcard. An explicit id wins over the wildcard. Both accept the normal `where` matchers; imported findings expose `level`, `file`, `line`, `ruleId`, `entity`, `tool` and `message`.
 
+A rule for an imported id or `<tool>/*` may omit `level`; the finding keeps its mapped level (e.g. `depcruise/*` with only `owners: ["@arch"]` sets owners on every depcruise finding and leaves `warn` as `warn`). Built-in rules still require `level`.
+
 ```yaml
 version: 1
 extends: [archtour:recommended]
@@ -444,11 +446,13 @@ GitHub runs `shell: bash` steps with `set -e`, so a linter's non-zero exit ends 
       buf:buf.jsonl
 ```
 
-**dependency-cruiser** exits 0 even with violations (the JSON reporter never fails). `--affected` limits the run to modules that reach the files changed since the given ref; `--ignore-known` softens known violations to severity `ignore`, which Archtour skips. The `git diff` needs the base branch fetched (`actions/checkout` with `fetch-depth: 0`):
+**dependency-cruiser** exits 0 even with violations (the JSON reporter never fails). The documented CI recipe runs a full cruise with the **base branch's** config and known-violations file, so the PR cannot loosen them:
 ```yaml
 - name: Run dependency-cruiser
   run: |
-    npx depcruise src --affected origin/main --output-type json > depcruise.json
+    git show origin/main:.dependency-cruiser.cjs > "$RUNNER_TEMP/depcruise.cjs"
+    git show origin/main:.dependency-cruiser-known-violations.json > "$RUNNER_TEMP/known.json" 2>/dev/null || echo "[]" > "$RUNNER_TEMP/known.json"
+    npx depcruise src --config "$RUNNER_TEMP/depcruise.cjs" --ignore-known "$RUNNER_TEMP/known.json" --output-type json > depcruise.json
   shell: bash
 - name: Archtour Guardrails
   uses: Zune2004/archtour@v0
@@ -457,7 +461,7 @@ GitHub runs `shell: bash` steps with `set -e`, so a linter's non-zero exit ends 
       depcruise:depcruise.json
 ```
 
-A minimal `.dependency-cruiser.js` forbidding `src/ui` from importing `src/db`:
+A minimal `.dependency-cruiser.cjs` (works in packages with `"type": "module"`) forbidding `src/ui` from importing `src/db`:
 ```js
 module.exports = {
   forbidden: [
@@ -466,14 +470,22 @@ module.exports = {
 };
 ```
 
-Without `--affected` every existing violation in the repo is imported, and each one is a finding: the baseline ratchet only stops a rule's count from growing, it does not hide findings. For violations that already exist, use dependency-cruiser's own known-violations file: write it once with `npx depcruise src --output-type baseline > .dependency-cruiser-known-violations.json`, commit it, and run with `--ignore-known`. Known violations then have severity `ignore` and Archtour skips them.
+**Why not `--affected`?** `--affected` keeps the changed modules and the ones that import them but not the changed modules' own new imports. A PR that adds `src/ui -> src/db` gives no violation (verified with real dependency-cruiser 18.9.0). The recipe above uses a full cruise so the new edge is evaluated.
+
+**Known violations and folder scope:** `--ignore-known` softens matched violations to severity `ignore` (which Archtour skips). In dependency-cruiser 18.9.0, folder-scope rules (`scope: "folder"`) are **not** softened by `--ignore-known`: their existing violations stay findings. Handle them with exceptions or the baseline ratchet (which blocks growth but does not hide findings).
+
+**Config that `extends` another file:** If your `.dependency-cruiser.cjs` extends a local file by a relative path, copy that file to `$RUNNER_TEMP` as well (or adjust the path so it resolves from there).
+
+Archtour also blocks a PR that changes the dependency-cruiser config or known-violations file (see the `linter-config-changed` finding below).
+
+`linter-config-changed` (soft) fires when a PR changes a config file of a tool passed with `--import`, matched by base name anywhere in the repo: depcruise `.dependency-cruiser.js`, `.dependency-cruiser.cjs`, `.dependency-cruiser.mjs`, `.dependency-cruiser.json`, `.dependency-cruiser-known-violations.json`; squawk `.squawk.toml`; buf `buf.yaml`, `buf.work.yaml`; oasdiff none. It is treated like `policy-changed` for overrides and base rules.
 
 ### Exception targets for imported ids
 
 Exception targets match the finding's entity ID or the part after the first colon:
 - Squawk and buf: `file:<path>` or `<path>` (e.g. `file:migrations/0002.sql` or `migrations/0002.sql`)
 - oasdiff: `api.route:<METHOD> <path>` or `<METHOD> <path>` (e.g. `api.route:GET /users` or `GET /users`)
-- dependency-cruiser: `dep:<from> -> <to>` or `cycle:<from>` or `file:<path>` (e.g. `dep:src/ui/button.js -> src/db/client.js`, `cycle:src/a.js`, `file:src/orphan.js`)
+- dependency-cruiser: `dep:<from> -> <to>` or `cycle:<from> -> <cycle...>` or `file:<path>` (e.g. `dep:src/ui/button.js -> src/db/client.js`, `cycle:src/a.js -> src/b.js -> src/a.js`, `file:src/orphan.js`)
 
 The `rule` field in an exception may be an explicit id (`squawk/ban-drop-column`) or a tool wildcard (`buf/*`, `depcruise/*`). A tool wildcard needs a specific target: `target: "*"` exits 3, because rules.yml can make imported ids `hard`, and hard findings are only excepted per target.
 

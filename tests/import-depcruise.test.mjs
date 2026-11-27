@@ -116,11 +116,11 @@ const DEPCRUISE_NO_CIRCULAR = {
   level: "warn",
   message: "circular dependency: src/a.js -> src/b.js -> src/a.js",
   source: { file: "src/a.js", line: 1 },
-  entity: "cycle:src/a.js",
-  entityId: "cycle:src/a.js",
+  entity: "cycle:src/a.js -> src/b.js -> src/a.js",
+  entityId: "cycle:src/a.js -> src/b.js -> src/a.js",
   event: {
     type: "imported.depcruise",
-    entityId: "cycle:src/a.js",
+    entityId: "cycle:src/a.js -> src/b.js -> src/a.js",
     kind: "dependency",
     source: { file: "src/a.js", line: 1 },
     message: "circular dependency: src/a.js -> src/b.js -> src/a.js"
@@ -535,7 +535,7 @@ test("depcruise: cycle names are normalised; a cycle that is not a list exits 3"
   try {
     const ok = parseJson(runCheck({ baseDir, headDir, imports: [`depcruise:${good.file}`] }));
     assert.deepStrictEqual(ok.findings.map(f => [f.entity, f.message]),
-      [["cycle:src/a.js", "circular dependency: src/a.js -> src/b.js -> src/a.js"]]);
+       [["cycle:src/a.js -> src/b.js -> src/a.js", "circular dependency: src/a.js -> src/b.js -> src/a.js"]]);
     const res = runCheck({ baseDir, headDir, imports: [`depcruise:${bad.file}`] });
     assert.strictEqual(res.status, 3);
     assert.strictEqual(res.stdout, "");

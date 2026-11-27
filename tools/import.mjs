@@ -7,6 +7,20 @@ import path from "node:path";
 
 export const SUPPORTED_TOOLS = ["squawk", "oasdiff", "buf", "depcruise"];
 
+// Config file basenames matched anywhere in the repo for linter-config-changed finding
+export const LINTER_CONFIG_FILES = {
+  depcruise: [
+    ".dependency-cruiser.js",
+    ".dependency-cruiser.cjs",
+    ".dependency-cruiser.mjs",
+    ".dependency-cruiser.json",
+    ".dependency-cruiser-known-violations.json"
+  ],
+  squawk: [".squawk.toml"],
+  buf: ["buf.yaml", "buf.work.yaml"],
+  oasdiff: []
+};
+
 function importError(message) {
   const err = new Error(message);
   err.exitCode = 3;
@@ -226,6 +240,10 @@ function depcruiseToFindings(items, displayPath, checkedFolder) {
       return null;
     }
     const violationType = item.type || "dependency";
+    const validTypes = ["dependency", "module", "cycle", "reachability", "instability"];
+    if (!validTypes.includes(violationType)) {
+      throw importError(`--import depcruise:${displayPath}: violation ${index + 1} is not a dependency-cruiser violation`);
+    }
     const from = normalizeImportPath(item.from, checkedFolder);
     const to = normalizeImportPath(item.to, checkedFolder);
     let entity;
@@ -241,7 +259,7 @@ function depcruiseToFindings(items, displayPath, checkedFolder) {
       // Cycle: from is the first, cycle array has the cycle path
       const cyclePath = chainNames(item.cycle, "cycle", index, displayPath, checkedFolder);
       const cycleNames = [from, ...cyclePath].join(" -> ");
-      entity = `cycle:${from}`;
+      entity = `cycle:${cycleNames}`;
       message = `circular dependency: ${cycleNames}`;
     } else if (violationType === "reachability") {
       // Reachability: from reaches to via via[]

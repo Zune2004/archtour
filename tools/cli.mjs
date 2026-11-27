@@ -35,7 +35,7 @@ import {
 import { auditHistory } from "./history.mjs";
 import { setSettings } from "./settings.mjs";
 import { helmAvailable, loadHelmConfig } from "./helm-render.mjs";
-import { loadImportedFindings } from "./import.mjs";
+import { loadImportedFindings, SUPPORTED_TOOLS, LINTER_CONFIG_FILES } from "./import.mjs";
 
 // ---------------------------------------------------------------- helpers
 
@@ -45,15 +45,30 @@ import { loadImportedFindings } from "./import.mjs";
 const NEEDS_HUMAN_DB_KINDS = new Set(["Database"]);
 const NEEDS_HUMAN_API_KINDS = new Set(["API", "GraphQL", "Protobuf"]);
 
-function computeNeedsHuman(changedPaths = [], baseFacts = {}, headFacts = {}, findings = []) {
+function computeNeedsHuman(changedPaths = [], baseFacts = {}, headFacts = {}, findings = [], importArgs = []) {
   const kindOf = new Map();
   for (const src of [...(baseFacts.sources || []), ...(headFacts.sources || [])]) {
     if (src && src.path && src.kind) kindOf.set(src.path.split(String.fromCharCode(92)).join("/"), src.kind);
   }
+  const importedTools = new Set();
+  for (const imp of importArgs || []) {
+    const colonIdx = String(imp).indexOf(":");
+    if (colonIdx > 0) {
+      const tool = String(imp).slice(0, colonIdx);
+      if (SUPPORTED_TOOLS.includes(tool)) importedTools.add(tool);
+    }
+  }
   const reasons = [];
   for (const raw of changedPaths) {
     const file = String(raw).split(String.fromCharCode(92)).join("/");
-    if (file === ".archtour" || file.startsWith(".archtour/")) reasons.push(`Archtour policy change: ${file}`);
+    const baseName = path.basename(file);
+    let isLinterConfig = false;
+    for (const tool of importedTools) {
+      if ((LINTER_CONFIG_FILES[tool] || []).includes(baseName)) { isLinterConfig = true; break; }
+    }
+    if (isLinterConfig) {
+      reasons.push(`linter config change: ${file}`);
+    } else if (file === ".archtour" || file.startsWith(".archtour/")) reasons.push(`Archtour policy change: ${file}`);
     // A PR that edits CI can switch this very check off.
     else if (file.startsWith(".github/workflows/") || file.startsWith(".github/actions/")) reasons.push(`CI workflow change: ${file}`);
     else if (NEEDS_HUMAN_DB_KINDS.has(kindOf.get(file))) reasons.push(`database change: ${file}`);
@@ -123,9 +138,10 @@ function applyImportedRuleConfig(findings, rules, now) {
   const explicitRules = new Map();
   const wildcardRules = new Map();
   for (const rule of rules) {
-    if (rule.id === "squawk/*" || rule.id === "oasdiff/*" || rule.id === "buf/*" || rule.id === "depcruise/*") {
-      wildcardRules.set(rule.id.split("/")[0], rule);
-    } else if (rule.id.startsWith("squawk/") || rule.id.startsWith("oasdiff/") || rule.id.startsWith("buf/") || rule.id.startsWith("depcruise/")) {
+    const tool = rule.id.split("/")[0];
+    if (SUPPORTED_TOOLS.includes(tool) && rule.id === `${tool}/*`) {
+      wildcardRules.set(tool, rule);
+    } else if (SUPPORTED_TOOLS.some(t => rule.id.startsWith(`${t}/`))) {
       explicitRules.set(rule.id, rule);
     }
   }
@@ -898,11 +914,32 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       ...(headDisc.files ? headDisc.files.map(f => f.path) : [])
     ];
 
+    // Orchestrator (2026-11-27): only walk for linter config files when a tool is imported, and never into
+    // node_modules or .git (folder mode runs on whole repositories).
+    const importedToolNames = (opts.import || []).map((imp) => String(imp).split(":")[0]);
+    const linterConfigBasenames = new Set(importedToolNames.flatMap((t) => LINTER_CONFIG_FILES[t] || []));
+    function listLinterConfigFiles(dir) {
+      const out = [];
+      if (linterConfigBasenames.size === 0) return out;
+      const walk = (abs, rel) => {
+        let entries;
+        try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          const relPath = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) { if (e.name !== "node_modules" && e.name !== ".git") walk(path.join(abs, e.name), relPath); }
+          else if (e.isFile() && linterConfigBasenames.has(e.name)) out.push(relPath.split(String.fromCharCode(92)).join("/"));
+        }
+      };
+      walk(dir, "");
+      return out;
+    }
     changedPaths = changedBetweenDirs(baseDir, headDir, [
       ...(baseDisc.files || []).map(f => f.path),
       ...(headDisc.files || []).map(f => f.path),
       ...listPolicyFiles(baseDir),
-      ...listPolicyFiles(headDir)
+      ...listPolicyFiles(headDir),
+      ...listLinterConfigFiles(baseDir),
+      ...listLinterConfigFiles(headDir)
     ]);
 
     const diff = diffFacts(baseFacts, headFacts);
@@ -1105,6 +1142,48 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
     findings.push(f);
   }
 
+  // Linter config changed findings: if --import <tool> was used and the PR changes
+  // a config file of that tool (matched by basename anywhere in the repo), add a soft finding.
+  if (opts.import && opts.import.length > 0) {
+    const importedTools = new Set();
+    for (const imp of opts.import) {
+      const colonIdx = imp.indexOf(":");
+      if (colonIdx > 0) {
+        const tool = imp.slice(0, colonIdx);
+        if (SUPPORTED_TOOLS.includes(tool)) {
+          importedTools.add(tool);
+        }
+      }
+    }
+    for (const tool of importedTools) {
+      const configFiles = LINTER_CONFIG_FILES[tool] || [];
+      for (const raw of changedPaths) {
+        const file = String(raw).split(String.fromCharCode(92)).join("/");
+        const baseName = path.basename(file);
+        if (configFiles.includes(baseName)) {
+          findings.push({
+            ruleId: "linter-config-changed",
+            level: "soft",
+            message: `${tool} config changed in this PR: ${file}`,
+            source: { file, line: 1 },
+            entity: `config:${file}`,
+            entityId: `config:${file}`,
+            event: {
+              type: "imported.linter-config-changed",
+              entityId: `config:${file}`,
+              kind: "config",
+              source: { file, line: 1 },
+              message: `${tool} config changed in this PR: ${file}`
+            },
+            owners: [],
+            docs: null,
+            adjustable: true
+          });
+        }
+      }
+    }
+  }
+
   // Exceptions
   let excFile = opts.exceptions || path.join(policyDir, ".archtour", "exceptions.yml");
   if (!fs.existsSync(excFile)) {
@@ -1124,7 +1203,7 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   const { auditOverrides } = applyOverrides(findings, rulesResult.rules, opts);
 
   // Needs-human computation
-  const needsHuman = computeNeedsHuman(changedPaths, baseFacts, headFacts, findings);
+  const needsHuman = computeNeedsHuman(changedPaths, baseFacts, headFacts, findings, opts.import);
 
   // Exit code calculation
   let exitCode = getExitCode(findings);

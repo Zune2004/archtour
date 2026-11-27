@@ -7,6 +7,7 @@ import YAML from "yaml";
 import { RECOMMENDED_RULES } from "./rules-recommended.mjs";
 import { mdText } from "./md.mjs";
 import { isSqlMigrationCandidate } from "./facts-sql.mjs";
+import { SUPPORTED_TOOLS } from "./import.mjs";
 
 export const LEVELS = ["off", "advisory", "warn", "soft", "hard"];
 
@@ -78,10 +79,17 @@ export function validateRule(rule, isNewRule = true) {
   }
 
   const id = rule.id.trim();
-  const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/") || id.startsWith("depcruise/");
-  const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*" || id === "depcruise/*");
+  const tool = id.split("/")[0];
+  const isImportedRule = SUPPORTED_TOOLS.includes(tool) && id.startsWith(`${tool}/`);
+  const isToolWildcard = SUPPORTED_TOOLS.includes(tool) && id === `${tool}/*`;
 
-  if (typeof rule.level !== "string" || !LEVELS.includes(rule.level)) {
+  // For imported rules and tool wildcards, level is optional (defaults to mapped level from the tool).
+  // For built-in rules, level is required.
+  const isBuiltInRule = !isImportedRule && !isToolWildcard;
+  if (isBuiltInRule && (typeof rule.level !== "string" || !LEVELS.includes(rule.level))) {
+    throw new Error(`Rule "${id}" has invalid field "level": "${rule.level}". Must be one of: ${LEVELS.join(", ")}`);
+  }
+  if (!isBuiltInRule && rule.level !== undefined && (typeof rule.level !== "string" || !LEVELS.includes(rule.level))) {
     throw new Error(`Rule "${id}" has invalid field "level": "${rule.level}". Must be one of: ${LEVELS.join(", ")}`);
   }
 
@@ -252,8 +260,9 @@ function mergeRuleIntoMap(rulesMap, incomingRule, sourceName, warnings) {
   } else {
     // New rule
     const id = incomingRule.id.trim();
-    const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/") || id.startsWith("depcruise/");
-    const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*" || id === "depcruise/*");
+    const tool = id.split("/")[0];
+    const isImportedRule = SUPPORTED_TOOLS.includes(tool) && id.startsWith(`${tool}/`);
+    const isToolWildcard = SUPPORTED_TOOLS.includes(tool) && id === `${tool}/*`;
     if (incomingRule.on == null && !isImportedRule && !isToolWildcard) {
       throw new Error(`Rule "${incomingRule.id}" is missing required field "on"`);
     }
@@ -608,8 +617,9 @@ export function loadExceptionsFile(filePath, opts = {}) {
     const ruleStr = item.rule.trim();
     const targetStr = item.target.trim();
 
-    // Allow tool wildcards: squawk/*, oasdiff/*, buf/*
-    const isToolWildcard = ruleStr === "squawk/*" || ruleStr === "oasdiff/*" || ruleStr === "buf/*" || ruleStr === "depcruise/*";
+    // Allow tool wildcards from SUPPORTED_TOOLS
+    const tool = ruleStr.split("/")[0];
+    const isToolWildcard = SUPPORTED_TOOLS.includes(tool) && ruleStr === `${tool}/*`;
     const allRules = (Array.isArray(opts.rules) && opts.rules.length > 0) ? opts.rules : RECOMMENDED_RULES;
     const isRuleGlob = ruleStr.includes("*") || ruleStr.includes("?");
     const matchingRules = allRules.filter(r => r.id === ruleStr || (isRuleGlob && matchGlob(r.id, ruleStr)));
@@ -697,14 +707,11 @@ export function applyExceptions(findings = [], exceptions = []) {
     } else {
       for (const f of findings) {
         if (f.excepted) continue;
-        // Match rule: exact match, alsoMatched, or tool wildcard (squawk/*, oasdiff/*, buf/*)
+        // Match rule: exact match, alsoMatched, or tool wildcard from SUPPORTED_TOOLS
         const toolPrefix = String(f.ruleId).split("/")[0];
         const ruleMatch = ex.rule === f.ruleId ||
           (Array.isArray(f.alsoMatched) && f.alsoMatched.includes(ex.rule)) ||
-          (ex.rule === "squawk/*" && toolPrefix === "squawk") ||
-          (ex.rule === "oasdiff/*" && toolPrefix === "oasdiff") ||
-          (ex.rule === "buf/*" && toolPrefix === "buf") ||
-          (ex.rule === "depcruise/*" && toolPrefix === "depcruise");
+          (SUPPORTED_TOOLS.includes(toolPrefix) && ex.rule === `${toolPrefix}/*`);
         if (!ruleMatch) continue;
 
         const entityId = f.event?.entityId || "";
