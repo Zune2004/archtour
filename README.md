@@ -179,6 +179,7 @@ There is no editor extension; the CLI is the editor integration.
 - **Exceptions (`.archtour/exceptions.yml`):** Auditable temporary exemptions requiring a target, reason, owner, and mandatory expiry date (capped at 365 days).
 - **Overrides:** A rule's owners (or, for rules without owners, anyone with write access who is not the PR author) can unblock a soft finding by commenting `/archtour override <ruleId> <sha> <reason>`, where `<sha>` is the full SHA of the PR's current head commit (the PR comment prints the command with it). The comment must be unedited (`updated_at` equals `created_at`). The same person must add the `archtour-override` label; on every run (including subsequent pushes), the label must be present and its latest labeller must match the unedited comment's author. Pushing a new commit changes the head SHA, automatically invalidating stale overrides (like GitHub's "dismiss stale approvals"). A PR author can never override their own PR, even when listed as an owner (a PR cannot approve itself; another owner must).
 - **Ratchet (`.archtour/baseline.json`):** Locks in existing technical debt counts (`archtour baseline .`); violation counts can stay flat or decrease, but increases are blocked.
+- **Import other linters:** `--import squawk:squawk.json`, `--import oasdiff:oasdiff.json` or `--import buf:buf.jsonl` turns Squawk, oasdiff and `buf breaking` output into normal findings with the same levels, owners, exceptions, overrides and ratchet.
 
 See [`docs/GUARDRAILS.md`](https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md) for the complete configuration reference, rule catalog, and CLI options.
 
@@ -222,7 +223,7 @@ Known gaps (the check does not see these changes):
 
 ## Files it cannot read
 
-A new or edited file that Archtour cannot read (a Helm template, a file over the size cap, a UTF-16 file) blocks the PR with a soft `changed-file-not-checked` finding: its rules did not run, so it is never reported as "nothing found". If you render Helm charts and scan the output in another step, lower that rule to `advisory` in the base branch's `.archtour/rules.yml` (see [GUARDRAILS 7.7](https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#file-not-checked)).
+A new or edited file that Archtour cannot read (a Helm template, a file over the size cap, a UTF-16 file) blocks the PR with a soft `changed-file-not-checked` finding: its rules did not run, so it is never reported as "nothing found". If you render Helm charts and scan the output in another step, lower that rule to `advisory` in the base branch's `.archtour/rules.yml` (see [GUARDRAILS 8.7](https://github.com/Zune2004/archtour/blob/main/docs/GUARDRAILS.md#file-not-checked)).
 
 ## How it compares
 

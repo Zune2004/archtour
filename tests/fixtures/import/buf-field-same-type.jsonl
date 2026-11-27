@@ -1,0 +1,2 @@
+{"path":"proto/user.proto","start_line":8,"start_column":12,"end_line":8,"end_column":17,"type":"FIELD_SAME_TYPE","message":"Field 'name' type changed from string to bytes"}
+{"start_line":1,"start_column":1,"end_line":1,"end_column":1,"type":"FILE_NO_DELETE","message":"File 'proto/old.proto' was deleted"}

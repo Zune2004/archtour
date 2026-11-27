@@ -78,12 +78,14 @@ export function validateRule(rule, isNewRule = true) {
   }
 
   const id = rule.id.trim();
+  const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/");
+  const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*");
 
   if (typeof rule.level !== "string" || !LEVELS.includes(rule.level)) {
     throw new Error(`Rule "${id}" has invalid field "level": "${rule.level}". Must be one of: ${LEVELS.join(", ")}`);
   }
 
-  if (isNewRule && rule.on == null) {
+  if (isNewRule && rule.on == null && !isImportedRule && !isToolWildcard) {
     throw new Error(`Rule "${id}" is missing required field "on"`);
   }
 
@@ -249,7 +251,10 @@ function mergeRuleIntoMap(rulesMap, incomingRule, sourceName, warnings) {
     });
   } else {
     // New rule
-    if (incomingRule.on == null) {
+    const id = incomingRule.id.trim();
+    const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/");
+    const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*");
+    if (incomingRule.on == null && !isImportedRule && !isToolWildcard) {
       throw new Error(`Rule "${incomingRule.id}" is missing required field "on"`);
     }
     rulesMap.set(incomingRule.id, {

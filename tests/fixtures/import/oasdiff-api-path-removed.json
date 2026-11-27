@@ -1,0 +1,1 @@
+[{"id":"api-path-removed-without-deprecation","text":"API path /users was removed without deprecation","level":3,"operation":"GET","path":"/users","section":"paths","baseSource":{"file":"openapi.yaml","line":12,"column":5},"fingerprint":"80a8c624dc40"}]

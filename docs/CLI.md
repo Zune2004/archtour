@@ -50,6 +50,7 @@ Architecture guardrails for a change (the CI gate).
 | `--rules <file>` | Custom rules file |
 | `--include-untracked` | Include untracked files with --changed-from |
 | `--cache-dir <dir>` | Directory to cache extracted facts |
+| `--import <tool:path>` | Import findings from external linter (repeatable; tools: squawk, oasdiff, buf) |
 | `--override <rule>` | Override a soft finding (repeatable) |
 | `--override-by <user>` | Override author |
 | `--override-reason <text>` | Override reason |
@@ -71,6 +72,7 @@ Lock in current architecture debt counts to baseline.json.
 | `--max-files <n>` | Maximum candidate files to examine (default: 20000) |
 | `--migration-dir <path>` | Extra folder whose .sql files are migrations (repeatable) |
 | `--max-file-size <MB>` | Skip files larger than this (default: 5; Terraform plan JSON: 50) |
+| `--import <tool:path>` | Import findings from external linter (repeatable; tools: squawk, oasdiff, buf) |
 
 ---
 

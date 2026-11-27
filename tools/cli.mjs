@@ -29,11 +29,13 @@ import {
   applyExceptions,
   applyOverrides,
   diffPolicy,
-  sortByReportLevel
+  sortByReportLevel,
+  matchGlob
 } from "./rules.mjs";
 import { auditHistory } from "./history.mjs";
 import { setSettings } from "./settings.mjs";
 import { helmAvailable, loadHelmConfig } from "./helm-render.mjs";
+import { loadImportedFindings } from "./import.mjs";
 
 // ---------------------------------------------------------------- helpers
 
@@ -62,6 +64,68 @@ function computeNeedsHuman(changedPaths = [], baseFacts = {}, headFacts = {}, fi
   }
   const unique = [...new Set(reasons)];
   return { value: unique.length > 0, reasons: unique };
+}
+
+function importedWhereMatches(finding, where) {
+  if (!where || typeof where !== "object") return true;
+  const tool = String(finding.ruleId).split("/")[0];
+  const values = {
+    level: finding.level,
+    file: finding.source?.file,
+    source: finding.source?.file,
+    line: finding.source?.line !== undefined ? String(finding.source.line) : undefined,
+    ruleId: finding.ruleId,
+    id: finding.ruleId,
+    entity: finding.entity ?? finding.event?.entityId,
+    tool,
+    message: finding.message
+  };
+  for (const [key, pattern] of Object.entries(where)) {
+    if (!(key in values)) return false;
+    const value = values[key];
+    const patterns = Array.isArray(pattern) ? pattern : [pattern];
+    const matched = patterns.some((p) => {
+      if (typeof p === "string" && p.startsWith("!")) {
+        return value === undefined || !matchGlob(value, p.slice(1));
+      }
+      return value !== undefined && matchGlob(value, p);
+    });
+    if (!matched) return false;
+  }
+  return true;
+}
+
+function applyImportedRule(findings, rule) {
+  for (const f of findings) {
+    if (!importedWhereMatches(f, rule.where)) continue;
+    if (rule.level !== undefined) f.level = rule.level;
+    if (rule.owners !== undefined) f.owners = Array.isArray(rule.owners) ? [...rule.owners] : (rule.owners ? [rule.owners] : []);
+    if (rule.message !== undefined) f.message = rule.message;
+    if (rule.docs !== undefined) f.docs = rule.docs;
+    if (rule.adjustable !== undefined) f.adjustable = rule.adjustable;
+  }
+}
+
+function applyImportedRuleConfig(findings, rules) {
+  const explicitRules = new Map();
+  const wildcardRules = new Map();
+  for (const rule of rules) {
+    if (rule.id === "squawk/*" || rule.id === "oasdiff/*" || rule.id === "buf/*") {
+      wildcardRules.set(rule.id.split("/")[0], rule);
+    } else if (rule.id.startsWith("squawk/") || rule.id.startsWith("oasdiff/") || rule.id.startsWith("buf/")) {
+      explicitRules.set(rule.id, rule);
+    }
+  }
+
+  // Explicit ids win over the tool wildcard, even when the explicit rule's `where` does not match.
+  for (const [id, rule] of explicitRules) {
+    applyImportedRule(findings.filter((f) => f.ruleId === id), rule);
+  }
+  for (const f of findings) {
+    if (explicitRules.has(f.ruleId)) continue;
+    const wildcardRule = wildcardRules.get(String(f.ruleId).split("/")[0]);
+    if (wildcardRule) applyImportedRule([f], wildcardRule);
+  }
 }
 
 // Files under <dir>/.archtour/, relative to <dir> (the policy folder is not part of file discovery).
@@ -363,6 +427,16 @@ function parseArgs(argv, command) {
       out.cacheDir = argv[++i];
     } else if (a.startsWith("--cache-dir=")) {
       out.cacheDir = a.slice("--cache-dir=".length);
+    } else if (a === "--import") {
+      const val = argv[++i];
+      if (!out.import) out.import = [];
+      else if (!Array.isArray(out.import)) out.import = [out.import];
+      out.import.push(val);
+    } else if (a.startsWith("--import=")) {
+      const val = a.slice("--import=".length);
+      if (!out.import) out.import = [];
+      else if (!Array.isArray(out.import)) out.import = [out.import];
+      out.import.push(val);
     } else if (a === "--include-untracked") {
       out.includeUntracked = true;
     } else if (a === "--head-sha") {
@@ -551,6 +625,19 @@ async function handleBaselineCommand(targetArg, opts = {}) {
     die(err.message, 3);
   }
 
+  // Load imported findings for baseline
+  let importedFindings = [];
+  if (opts.import && opts.import.length > 0) {
+    try {
+      importedFindings = loadImportedFindings(opts.import);
+      applyImportedRuleConfig(importedFindings, rulesResult.rules);
+      importedFindings = importedFindings.filter(f => f.level !== "off");
+    } catch (err) {
+      const msg = err?.message || String(err);
+      die(msg, err.exitCode || 3);
+    }
+  }
+
   const disc = discoverFiles(targetDir, opts);
   if (disc.truncated) {
     const unexamined = disc.unexaminedCount || 0;
@@ -563,6 +650,12 @@ async function handleBaselineCommand(targetArg, opts = {}) {
 
   const counts = {};
   for (const f of findings) {
+    if (f.level === "off") continue;
+    counts[f.ruleId] = (counts[f.ruleId] || 0) + 1;
+  }
+
+  // Include imported findings in baseline counts
+  for (const f of importedFindings) {
     if (f.level === "off") continue;
     counts[f.ruleId] = (counts[f.ruleId] || 0) + 1;
   }
@@ -702,6 +795,21 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
     die(err.message, err.exitCode || 3);
   }
   opts = { ...opts, helmConfig };
+
+  // Load imported findings early so they participate in baseline ratchet
+  let importedFindings = [];
+  if (opts.import && opts.import.length > 0) {
+    try {
+      importedFindings = loadImportedFindings(opts.import);
+      // Apply explicit and wildcard rules from rules.yml to imported findings
+      applyImportedRuleConfig(importedFindings, rulesResult.rules);
+      // Filter out findings with level "off" (suppressed by wildcard rules)
+      importedFindings = importedFindings.filter(f => f.level !== "off");
+    } catch (err) {
+      const msg = err?.message || String(err);
+      die(msg, err.exitCode || 3);
+    }
+  }
 
   let baseFacts = { entities: [], relations: [] };
   let headFacts = { entities: [], relations: [] };
@@ -926,6 +1034,12 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
       currentCounts[f.ruleId] = (currentCounts[f.ruleId] || 0) + 1;
     }
 
+    // Include imported findings in ratchet counts
+    for (const f of importedFindings) {
+      if (f.level === "off") continue;
+      currentCounts[f.ruleId] = (currentCounts[f.ruleId] || 0) + 1;
+    }
+
     for (const rule of rulesResult.rules) {
       const ruleId = rule.id;
       const baseCount = baselineCounts[ruleId] || 0;
@@ -944,7 +1058,31 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
         celebrations.push(`🎉 ratchet: ${ruleId} dropped from ${baseCount} to ${currCount}! Run \`archtour baseline\` to lock it in.`);
       }
     }
+
+    // Imported ids are not in the built-in pack; ratchet them too when rules.yml did not declare them.
+    const declaredRuleIds = new Set(rulesResult.rules.map((r) => r.id));
+    for (const ruleId of new Set(importedFindings.map((f) => f.ruleId))) {
+      if (declaredRuleIds.has(ruleId)) continue;
+      const baseCount = baselineCounts[ruleId] || 0;
+      const currCount = currentCounts[ruleId] || 0;
+      if (currCount > baseCount) {
+        const sample = importedFindings.find((f) => f.ruleId === ruleId);
+        findings.push({
+          ruleId,
+          level: sample?.level || "soft",
+          message: `ratchet: ${ruleId} ${baseCount} -> ${currCount}`,
+          owners: sample?.owners ? [...sample.owners] : [],
+          docs: sample?.docs || null,
+          source: { file: path.relative(process.cwd(), baselinePath) || baselinePath, line: 1 }
+        });
+      } else if (currCount < baseCount) {
+        celebrations.push(`🎉 ratchet: ${ruleId} dropped from ${baseCount} to ${currCount}! Run \`archtour baseline\` to lock it in.`);
+      }
+    }
   }
+
+  // Add imported findings to main findings array
+  findings.push(...importedFindings);
 
   // Exceptions
   let excFile = opts.exceptions || path.join(policyDir, ".archtour", "exceptions.yml");
@@ -1138,6 +1276,7 @@ function printCheckHelp() {
   console.log("  --rules <file>              Custom rules file");
   console.log("  --include-untracked         Include untracked files with --changed-from");
   console.log("  --cache-dir <dir>           Directory to cache extracted facts");
+  console.log("  --import <tool:path>        Import findings from Squawk, oasdiff or buf output (repeatable)");
   console.log("  --override <rule>           Override a soft finding (repeatable)");
   console.log("  --override-by <user>        Override author");
   console.log("  --override-reason <text>    Override reason");
@@ -1162,6 +1301,7 @@ function printBaselineHelp() {
   console.log("  --max-files <n>             Maximum candidate files to examine (default: 20000)");
   console.log("  --migration-dir <path>      Extra folder whose .sql files are migrations (repeatable)");
   console.log("  --max-file-size <MB>        Skip files larger than this (default: 5; Terraform plan JSON: 50)");
+  console.log("  --import <tool:path>        Include imported findings in the baseline (repeatable)");
 }
 
 function printFactsHelp() {

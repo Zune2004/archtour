@@ -46,6 +46,10 @@ inputs:
     description: 'Render Helm charts with helm template: auto, on or off (default auto)'
     required: false
     default: 'auto'
+  import:
+    description: 'Newline-separated "tool:path" pairs for importing Squawk, oasdiff or buf output (for example "squawk:squawk.json"). Run those linters in an earlier step, before Archtour.'
+    required: false
+    default: ''
   needs-human-label:
     description: 'Label to add when needs-human is true (optional)'
     required: false
@@ -224,6 +228,7 @@ runs:
         INPUT_MIGRATION_DIRS: ${{ inputs.migration-dirs }}
         INPUT_MAX_FILE_SIZE: ${{ inputs.max-file-size }}
         INPUT_RENDER_HELM: ${{ inputs.render-helm }}
+        INPUT_IMPORT: ${{ inputs.import }}
         EVENT_NAME: ${{ github.event_name }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         ARCHTOUR_HAS_OVERRIDE: ${{ env.ARCHTOUR_HAS_OVERRIDE }}
@@ -313,6 +318,15 @@ runs:
 
         if [ -n "$INPUT_RENDER_HELM" ]; then
           CHECK_ARGS+=("--render-helm=$INPUT_RENDER_HELM")
+        fi
+
+        if [ -n "$INPUT_IMPORT" ]; then
+          while IFS= read -r item; do
+            item=$(printf '%s' "$item" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/\r$//')
+            if [ -n "$item" ]; then
+              CHECK_ARGS+=("--import=$item")
+            fi
+          done <<< "$INPUT_IMPORT"
         fi
 
         set +e

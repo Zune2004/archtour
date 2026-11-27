@@ -349,11 +349,56 @@ Any changes to policy files under `.archtour/` in a PR are evaluated:
 
 ---
 
-## 7. Formats
+## 7. Importing other linters
+
+`archtour check` and `archtour baseline` can turn the machine output of tools your CI already runs into normal Archtour findings. Pass one `--import <tool>:<path>` per file (repeatable):
+
+```
+archtour check --changed-from origin/main . \
+  --import squawk:squawk.json \
+  --import oasdiff:oasdiff.json \
+  --import buf:buf.jsonl
+```
+
+| Tool | Accepted format | Level |
+|---|---|---|
+| Squawk | JSON array (`squawk --reporter json`) | `Warning` -> `soft`, `Error` -> `hard` |
+| oasdiff | JSON array (`oasdiff breaking --format json`) | level 3 -> `soft`, 2 -> `warn`, 1 -> `advisory` |
+| buf | JSON Lines (`buf breaking --error-format json`) | every annotation -> `soft` |
+
+Imported rule ids are `<tool>/<id>` (`squawk/ban-drop-column`, `oasdiff/api-path-removed-without-deprecation`, `buf/FIELD_SAME_TYPE`). They support the same owners, exceptions, overrides, needs-human, baseline ratchet and Markdown report as built-in rules. The baseline ratchet also counts imported ids that `rules.yml` does not declare.
+
+### Setting levels and owners for imported ids
+
+Add a rule with the imported id (no `on` field is needed) or a `<tool>/*` wildcard. An explicit id wins over the wildcard. Both accept the normal `where` matchers; imported findings expose `level`, `file`, `line`, `ruleId`, `entity`, `tool` and `message`.
+
+```yaml
+version: 1
+extends: [archtour:recommended]
+rules:
+  - id: squawk/ban-drop-column
+    level: hard
+    owners: ["@db-team"]
+    message: "Column drops need a backfill plan"
+  - id: oasdiff/*
+    level: off
+    where:
+      level: warn
+```
+
+The second rule turns off every oasdiff WARN item (level 2) and leaves oasdiff ERR items at `soft`.
+
+### Fail closed
+
+A missing file, invalid JSON, the wrong top-level shape, or an item that does not match the documented format exits `3` with a one-line `archtour: --import <tool>:<path>: ...` error naming the file and the tool. An empty Squawk or oasdiff file is not valid (both write `[]` when there are no findings); an empty buf file is valid and means no findings. Archtour never runs the linters: run them in an earlier CI step and pass their output files.
+
+---
+
+## 8. Formats
 
 Archtour Guardrails supports offline parsing, facts extraction, and structural diffs across diverse architectural and schema definition formats.
 
-### 7.1 SQL Migrations
+### 8.1 SQL Migrations
 
 Archtour Guardrails inspects database migration files across PostgreSQL and MySQL DDL to track schema changes and flag dangerous operations in pull requests before deployment.
 
@@ -374,7 +419,7 @@ Archtour Guardrails inspects database migration files across PostgreSQL and MySQ
 - **No Dialect-Specific Exotic DDL**: Partitioning DDL, tablespace assignments, custom type creation (`CREATE TYPE`), and vendor-specific storage engine options are ignored safely.
 
 <a id="kubernetes"></a>
-### 7.2 Kubernetes Manifests
+### 8.2 Kubernetes Manifests
 
 Archtour Guardrails supports scanning multi-document Kubernetes YAML manifests (`---`), extracting workloads, containers, services, and ingresses, and evaluating security and operational guardrails offline.
 
@@ -456,7 +501,7 @@ never downloads anything: no `helm repo` or `helm dependency` command is run, an
 written to.
 
 <a id="graphql"></a>
-### 7.3 GraphQL
+### 8.3 GraphQL
 
 GraphQL schema guardrails analyze GraphQL SDL documents (`*.graphql`, `*.gql`, `*.graphqls`). Several files in one directory form a unified schema concatenated in path order.
 
@@ -470,7 +515,7 @@ GraphQL schema guardrails analyze GraphQL SDL documents (`*.graphql`, `*.gql`, `
 - `entity.added` / `entity.removed`: Emitted for added or removed GraphQL types.
 
 <a id="protobuf--grpc"></a>
-### 7.4 Protocol Buffers / gRPC
+### 8.4 Protocol Buffers / gRPC
 
 Protobuf guardrails inspect proto2 and proto3 definition files (`*.proto`) without external dependencies.
 
@@ -494,7 +539,7 @@ Protobuf guardrails inspect proto2 and proto3 definition files (`*.proto`) witho
 - `proto.package_changed`: Package declaration changed (`warn`).
 - `proto.required_added`: New required field added or existing field changed to required (`warn`).
 
-### 7.5 Docker Compose, Prisma & OpenAPI
+### 8.5 Docker Compose, Prisma & OpenAPI
 
 Docker Compose, Prisma ORM schemas, and OpenAPI specification documents are foundational formats parsed natively.
 
@@ -510,7 +555,7 @@ Docker Compose, Prisma ORM schemas, and OpenAPI specification documents are foun
 - `api.route_added`, `api.route_removed`, `api.param_required_added`, `api.request_required_added`, `api.security_removed`.
 
 <a id="terraform"></a>
-### 7.6 Terraform Plans
+### 8.6 Terraform Plans
 
 Archtour Guardrails inspects Terraform plan JSON files to enforce infrastructure guardrails before deployment.
 
@@ -550,7 +595,7 @@ In CI the plan file is generated, not committed. Write it inside the checked fol
 Archtour never runs `terraform`, never connects to cloud APIs or networks, never reads Terraform remote state files, and never accesses cloud credentials or secret values. Sensitive attributes marked in plans are redacted to `(sensitive)` and never appear in reports.
 
 <a id="file-not-checked"></a>
-### 7.7 File Not Checked
+### 8.7 File Not Checked
 
 Candidate architecture files that cannot be scanned (e.g. Helm templates or files exceeding the size cap) emit a `file-not-checked` finding naming the file and the reason. The level depends on what the skip hides:
 
@@ -588,7 +633,7 @@ Reviewers should read these findings as "this file was not checked", never as ap
 file, and let the check run on the real content before overriding.
 
 <a id="parse-errors"></a>
-### 7.8 Parse Errors
+### 8.8 Parse Errors
 
 When a candidate file fails to parse, Archtour isolates the error to prevent crashes:
 - `parse-error-head` (`soft`): A file that parsed successfully in base failed to parse in head.
@@ -597,7 +642,7 @@ When a candidate file fails to parse, Archtour isolates the error to prevent cra
 
 ---
 
-## 8. Security & Markdown Escaping
+## 9. Security & Markdown Escaping
 
 - **No Network / No Browser**: `archtour check` runs entirely offline with pure Node.js parsers.
 - **Hostile Text Sanitisation**: All user text (service names, model names, routes) is passed through `mdText` escaping before Markdown generation:
@@ -607,7 +652,7 @@ When a candidate file fails to parse, Archtour isolates the error to prevent cra
 
 ---
 
-## 9. CI/CD Gate (GitHub Action)
+## 10. CI/CD Gate (GitHub Action)
 
 Archtour Guardrails integrates directly into GitHub Actions via `uses: Zune2004/archtour@v0` to act as an automated architectural gate on pull requests, merge queues, and release tags.
 
@@ -695,7 +740,7 @@ On `release` and `push` tag events:
 
 ---
 
-## 10. Audit Your History (`archtour audit-history`)
+## 11. Audit Your History (`archtour audit-history`)
 
 Run guardrails across your repository's commit history to discover what architectural rules, security boundaries, or breaking schema changes would have been flagged in the past.
 
@@ -731,7 +776,7 @@ archtour audit-history --json > audit.json
 
 ---
 
-## 11. CLI Reference (`archtour check --help`)
+## 12. CLI Reference (`archtour check --help`)
 
 View all available options and flags for the guardrails check command:
 
