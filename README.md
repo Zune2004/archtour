@@ -98,7 +98,8 @@ with the same result). Do not skip the job with an `if:`: GitHub counts a skippe
 
 Optional inputs: `paths`, `ignore`, `include-tests`, `migration-dirs` (extra migration folders, comma-separated, e.g.
 `db/deploy`), `max-file-size` (MB, default 5), `render-helm` (`auto` by default; `on` fails with exit 3 when helm is
-missing, `off` keeps the raw-template behaviour) and `needs-human-label` (label to add when the PR needs human review).
+missing, `off` keeps the raw-template behaviour), `needs-human-label` (label to add when the PR needs human review),
+and `import` (newline-separated "tool:path" pairs for importing Squawk, oasdiff or buf output).
 
 - **`hard` findings** (e.g. privileged container, removing API route security, deleting databases in Terraform): exit code `1`, blocks merge, cannot be overridden in pull requests.
 - **`soft` findings** (e.g. dropped database columns, removed API routes): exit code `2`, blocks merge unless overridden by an authorized owner.

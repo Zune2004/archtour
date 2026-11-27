@@ -13,6 +13,25 @@ function importError(message) {
   return err;
 }
 
+function normalizeImportPath(rawPath, checkedFolder) {
+  if (!rawPath || typeof rawPath !== "string") return rawPath;
+  let normalized = rawPath.replace(/\\/g, "/");
+  if (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+  if (path.isAbsolute(normalized) && checkedFolder) {
+    const checkedAbs = path.resolve(checkedFolder).replace(/\\/g, "/");
+    const normalizedAbs = path.resolve(normalized).replace(/\\/g, "/");
+    const checkedLower = checkedAbs.toLowerCase();
+    const normalizedLower = normalizedAbs.toLowerCase();
+    if (normalizedLower.startsWith(checkedLower + "/") || normalizedLower === checkedLower) {
+      // Preserve original casing from normalizedAbs for the relative portion
+      normalized = normalizedAbs.slice(checkedAbs.length + 1);
+    }
+  }
+  return normalized;
+}
+
 export function validateImportArg(arg) {
   if (typeof arg !== "string" || arg === "") {
     throw importError('--import: expected "tool:path"');
@@ -37,7 +56,9 @@ function readText(filePath, tool, displayPath) {
     throw importError(`--import ${tool}:${displayPath}: file not found`);
   }
   try {
-    return fs.readFileSync(filePath, "utf8");
+    const content = fs.readFileSync(filePath, "utf8");
+    // Strip UTF-8 BOM if present
+    return content.replace(/^\uFEFF/, "");
   } catch {
     throw importError(`--import ${tool}:${displayPath}: cannot read file`);
   }
@@ -99,12 +120,12 @@ function importedFinding(ruleId, level, message, file, line, entity, eventType, 
   };
 }
 
-function squawkToFindings(items, displayPath) {
+function squawkToFindings(items, displayPath, checkedFolder) {
   return items.map((item, index) => {
     if (!isSquawkViolation(item)) {
       throw importError(`--import squawk:${displayPath}: item ${index + 1} is not a Squawk violation`);
     }
-    const file = item.file;
+    const file = normalizeImportPath(item.file, checkedFolder);
     const line = item.line + 1; // Squawk is 0-based
     const entity = `file:${file}`;
     const message = typeof item.message === "string" ? item.message : "";
@@ -122,7 +143,7 @@ function squawkToFindings(items, displayPath) {
   });
 }
 
-function oasdiffToFindings(items, displayPath) {
+function oasdiffToFindings(items, displayPath, checkedFolder) {
   return items.map((item, index) => {
     if (!isOasdiffChange(item)) {
       throw importError(`--import oasdiff:${displayPath}: item ${index + 1} is not an oasdiff change`);
@@ -130,8 +151,9 @@ function oasdiffToFindings(items, displayPath) {
     const level = item.level === 3 ? "soft" : item.level === 2 ? "warn" : "advisory";
     const baseSource = isPlainObject(item.baseSource) ? item.baseSource : null;
     const revisionSource = isPlainObject(item.revisionSource) ? item.revisionSource : null;
-    const source = baseSource || revisionSource;
-    const file = source && typeof source.file === "string" && source.file ? source.file : "unknown";
+    // Prefer revisionSource (the PR's file) over baseSource
+    const source = revisionSource || baseSource;
+    const file = source && typeof source.file === "string" && source.file ? normalizeImportPath(source.file, checkedFolder) : "unknown";
     const line = source && Number.isInteger(source.line) && source.line > 0 ? source.line : 1;
     const operation = typeof item.operation === "string" ? item.operation : "";
     const apiPath = typeof item.path === "string" ? item.path : "";
@@ -154,12 +176,12 @@ function oasdiffToFindings(items, displayPath) {
   });
 }
 
-function bufToFindings(items, displayPath) {
+function bufToFindings(items, displayPath, checkedFolder) {
   return items.map((item, index) => {
     if (!isBufAnnotation(item)) {
       throw importError(`--import buf:${displayPath}: annotation ${index + 1} is not a buf annotation`);
     }
-    const file = typeof item.path === "string" && item.path ? item.path : "unknown";
+    const file = normalizeImportPath(typeof item.path === "string" && item.path ? item.path : "unknown", checkedFolder);
     const line = item.start_line;
     const entity = `file:${file}`;
     const message = typeof item.message === "string" && item.message ? item.message : item.type;
@@ -198,7 +220,7 @@ function readBufAnnotations(filePath, displayPath) {
   return items;
 }
 
-export function loadImportedFindings(importArgs) {
+export function loadImportedFindings(importArgs, checkedFolder) {
   const allFindings = [];
   for (const arg of importArgs) {
     const { tool, filePath } = validateImportArg(arg);
@@ -206,13 +228,16 @@ export function loadImportedFindings(importArgs) {
 
     if (tool === "squawk") {
       const items = readJsonArray(absPath, tool, filePath, "a Squawk JSON array");
-      allFindings.push(...squawkToFindings(items, filePath));
+      const findings = squawkToFindings(items, filePath, checkedFolder);
+      for (const f of findings) allFindings.push(f);
     } else if (tool === "oasdiff") {
       const items = readJsonArray(absPath, tool, filePath, "an oasdiff JSON array");
-      allFindings.push(...oasdiffToFindings(items, filePath));
+      const findings = oasdiffToFindings(items, filePath, checkedFolder);
+      for (const f of findings) allFindings.push(f);
     } else {
       const items = readBufAnnotations(absPath, filePath);
-      allFindings.push(...bufToFindings(items, filePath));
+      const findings = bufToFindings(items, filePath, checkedFolder);
+      for (const f of findings) allFindings.push(f);
     }
   }
   return allFindings;

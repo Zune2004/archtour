@@ -15,5 +15,5 @@ fixture is described here instead.
 | `buf-file-no-delete.jsonl` | buf | One `FILE_NO_DELETE` annotation with no `path` (reported as file `unknown`). |
 | `buf-empty.jsonl` | buf | Empty file: buf writes nothing when there are no findings. |
 
-The shapes follow `_brief/adapter-formats.md`: Squawk and oasdiff write a JSON
+The shapes follow the adapter formats documentation: Squawk and oasdiff write a JSON
 array, buf writes one JSON object per line.

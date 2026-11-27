@@ -1,4 +1,4 @@
-// Acceptance tests for T-115 adapter mode (Squawk, oasdiff, buf).
+// Acceptance tests for adapter mode (Squawk, oasdiff, buf).
 //
 // The fixtures are the exact shapes the tools write. JSON and JSON Lines cannot
 // carry comments without breaking the production parsers, so every fixture is
@@ -357,7 +357,8 @@ rules:
     assert.deepStrictEqual(parsed.findings, [{
       ...squawkFinding(1),
       level: "hard",
-      message: "Column drops need a backfill plan",
+      // Orchestrator (2026-11-27, T-131 example 5): a rule message keeps the tool text, as for built-in rules.
+      message: "Column drops need a backfill plan - Dropping a column is destructive and breaks running queries.",
       owners: ["@db-team"]
     }]);
     assert.deepStrictEqual(parsed.summary, expectedSummary({ total: 1, blocking: 1, hard: 1 }));

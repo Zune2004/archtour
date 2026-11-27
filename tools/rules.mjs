@@ -608,13 +608,15 @@ export function loadExceptionsFile(filePath, opts = {}) {
     const ruleStr = item.rule.trim();
     const targetStr = item.target.trim();
 
-    // N7: An exception whose rule is * (or glob matching > 1 rule) or whose target is * is rejected (exit 3)
-    // unless it names exactly one rule and the rule is not hard. Hard rules can only be excepted per target (no * target).
+    // Allow tool wildcards: squawk/*, oasdiff/*, buf/*
+    const isToolWildcard = ruleStr === "squawk/*" || ruleStr === "oasdiff/*" || ruleStr === "buf/*";
     const allRules = (Array.isArray(opts.rules) && opts.rules.length > 0) ? opts.rules : RECOMMENDED_RULES;
     const isRuleGlob = ruleStr.includes("*") || ruleStr.includes("?");
     const matchingRules = allRules.filter(r => r.id === ruleStr || (isRuleGlob && matchGlob(r.id, ruleStr)));
 
-    if (ruleStr === "*" || (isRuleGlob && matchingRules.length > 1)) {
+    // N7: An exception whose rule is * (or glob matching > 1 rule) is rejected (exit 3)
+    // unless it names exactly one rule and the rule is not hard. Tool wildcards are allowed.
+    if (ruleStr === "*" || (isRuleGlob && matchingRules.length > 1 && !isToolWildcard)) {
       const error = new Error(`Invalid exception entry in "${filePath}" at line ${line}: exception rule "${ruleStr}" cannot be "*" or match multiple rules`);
       error.exitCode = 3;
       throw error;
@@ -622,7 +624,8 @@ export function loadExceptionsFile(filePath, opts = {}) {
 
     if (targetStr === "*") {
       const ruleObj = matchingRules.length === 1 ? matchingRules[0] : allRules.find(r => r.id === ruleStr);
-      if (!ruleObj || ruleObj.level === "hard") {
+      // Orchestrator (2026-11-27): a tool wildcard can include hard imported ids, so it needs a specific target too.
+      if (isToolWildcard || !ruleObj || ruleObj.level === "hard") {
         const error = new Error(`Invalid exception entry in "${filePath}" at line ${line}: hard rule "${ruleObj ? ruleObj.id : ruleStr}" cannot have wildcard target "*"`);
         error.exitCode = 3;
         throw error;
@@ -694,7 +697,13 @@ export function applyExceptions(findings = [], exceptions = []) {
     } else {
       for (const f of findings) {
         if (f.excepted) continue;
-        const ruleMatch = ex.rule === "*" || ex.rule === f.ruleId || (Array.isArray(f.alsoMatched) && f.alsoMatched.includes(ex.rule));
+        // Match rule: exact match, alsoMatched, or tool wildcard (squawk/*, oasdiff/*, buf/*)
+        const toolPrefix = String(f.ruleId).split("/")[0];
+        const ruleMatch = ex.rule === f.ruleId ||
+          (Array.isArray(f.alsoMatched) && f.alsoMatched.includes(ex.rule)) ||
+          (ex.rule === "squawk/*" && toolPrefix === "squawk") ||
+          (ex.rule === "oasdiff/*" && toolPrefix === "oasdiff") ||
+          (ex.rule === "buf/*" && toolPrefix === "buf");
         if (!ruleMatch) continue;
 
         const entityId = f.event?.entityId || "";

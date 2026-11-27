@@ -95,18 +95,31 @@ function importedWhereMatches(finding, where) {
   return true;
 }
 
-function applyImportedRule(findings, rule) {
+function applyImportedRule(findings, rule, now) {
+  const todayStr = now ? new Date(now).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
   for (const f of findings) {
     if (!importedWhereMatches(f, rule.where)) continue;
     if (rule.level !== undefined) f.level = rule.level;
     if (rule.owners !== undefined) f.owners = Array.isArray(rule.owners) ? [...rule.owners] : (rule.owners ? [rule.owners] : []);
-    if (rule.message !== undefined) f.message = rule.message;
+    // Custom message: combine rule message with tool's original message like built-in rules do
+    if (rule.message !== undefined) {
+      const toolMessage = f.message;
+      f.message = toolMessage && rule.message !== toolMessage ? `${rule.message} - ${toolMessage}` : rule.message;
+    }
     if (rule.docs !== undefined) f.docs = rule.docs;
     if (rule.adjustable !== undefined) f.adjustable = rule.adjustable;
+    // Apply enforce_from like built-in rules do
+    if (rule.enforce_from && (f.level === "soft" || f.level === "hard")) {
+      if (todayStr < rule.enforce_from) {
+        const originalLevel = f.level;
+        f.level = "warn";
+        f.message = `${f.message} (becomes ${originalLevel} on ${rule.enforce_from})`;
+      }
+    }
   }
 }
 
-function applyImportedRuleConfig(findings, rules) {
+function applyImportedRuleConfig(findings, rules, now) {
   const explicitRules = new Map();
   const wildcardRules = new Map();
   for (const rule of rules) {
@@ -119,12 +132,12 @@ function applyImportedRuleConfig(findings, rules) {
 
   // Explicit ids win over the tool wildcard, even when the explicit rule's `where` does not match.
   for (const [id, rule] of explicitRules) {
-    applyImportedRule(findings.filter((f) => f.ruleId === id), rule);
+    applyImportedRule(findings.filter((f) => f.ruleId === id), rule, now);
   }
   for (const f of findings) {
     if (explicitRules.has(f.ruleId)) continue;
     const wildcardRule = wildcardRules.get(String(f.ruleId).split("/")[0]);
-    if (wildcardRule) applyImportedRule([f], wildcardRule);
+    if (wildcardRule) applyImportedRule([f], wildcardRule, now);
   }
 }
 
@@ -629,8 +642,8 @@ async function handleBaselineCommand(targetArg, opts = {}) {
   let importedFindings = [];
   if (opts.import && opts.import.length > 0) {
     try {
-      importedFindings = loadImportedFindings(opts.import);
-      applyImportedRuleConfig(importedFindings, rulesResult.rules);
+      importedFindings = loadImportedFindings(opts.import, targetDir);
+      applyImportedRuleConfig(importedFindings, rulesResult.rules, opts.now);
       importedFindings = importedFindings.filter(f => f.level !== "off");
     } catch (err) {
       const msg = err?.message || String(err);
@@ -800,13 +813,19 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   let importedFindings = [];
   if (opts.import && opts.import.length > 0) {
     try {
-      importedFindings = loadImportedFindings(opts.import);
+      // Determine the checked folder for path normalization:
+      // - --state mode: the state directory
+      // - --changed-from mode: the target directory (working tree)
+      // - folder mode (base head): the head directory (the PR being checked)
+      const checkedFolder = isStateMode ? stateDir : (isChangedMode ? targetDir : headDir);
+      importedFindings = loadImportedFindings(opts.import, checkedFolder);
       // Apply explicit and wildcard rules from rules.yml to imported findings
-      applyImportedRuleConfig(importedFindings, rulesResult.rules);
+      applyImportedRuleConfig(importedFindings, rulesResult.rules, opts.now);
       // Filter out findings with level "off" (suppressed by wildcard rules)
       importedFindings = importedFindings.filter(f => f.level !== "off");
     } catch (err) {
       const msg = err?.message || String(err);
+      policyCleanup();
       die(msg, err.exitCode || 3);
     }
   }
@@ -1082,7 +1101,9 @@ async function handleCheckCommand(baseDir, headDir, opts = {}) {
   }
 
   // Add imported findings to main findings array
-  findings.push(...importedFindings);
+  for (const f of importedFindings) {
+    findings.push(f);
+  }
 
   // Exceptions
   let excFile = opts.exceptions || path.join(policyDir, ".archtour", "exceptions.yml");
@@ -1411,6 +1432,11 @@ async function main() {
     }
   }
   setSettings({ migrationDirs: opts.migrationDirs, maxFileSizeMb: opts.maxFileSize });
+
+  // --import is only for check and baseline
+  if (opts.import && opts.import.length > 0 && cmd !== "check" && cmd !== "baseline") {
+    die("--import is only for check and baseline", 3);
+  }
 
   const input = opts._[0];
   if (cmd === "scan") await handleScanCommand(input, opts);

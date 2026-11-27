@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_FILE = fileURLToPath(import.meta.url);
@@ -31,7 +31,7 @@ const WRITE_CALLS = [
 ];
 const WRITE_CALL_RE = new RegExp("\\b(" + WRITE_CALLS.join("|") + ")\\b\\(");
 
-function stripComments(text) {
+export function stripComments(text) {
   const lines = text.split("\n");
   const out = new Array(lines.length).fill("");
   let inBlock = false;
@@ -40,8 +40,13 @@ function stripComments(text) {
     const line = lines[lineIdx];
     let i = 0;
     let cur = "";
+    let inString = false;
+    let stringChar = "";
+    let inTemplateInterpolation = 0;
 
     while (i < line.length) {
+      const ch = line[i];
+
       if (inBlock) {
         const end = line.indexOf("*/", i);
         if (end === -1) {
@@ -50,38 +55,60 @@ function stripComments(text) {
           i = end + 2;
           inBlock = false;
         }
-      } else {
-        const slash = line.indexOf("//", i);
-        const star = line.indexOf("/*", i);
+        continue;
+      }
 
-        let next = -1;
-        let isLineComment = false;
-        let isBlockComment = false;
-
-        if (slash !== -1 && star !== -1) {
-          next = Math.min(slash, star);
-          isLineComment = slash <= star;
-          isBlockComment = star < slash;
-        } else if (slash !== -1) {
-          next = slash;
-          isLineComment = true;
-        } else if (star !== -1) {
-          next = star;
-          isBlockComment = true;
-        } else {
-          cur += line.slice(i);
-          break;
+      if (inString) {
+        if (ch === "\\" && i + 1 < line.length) {
+          cur += line.slice(i, i + 2);
+          i += 2;
+          continue;
         }
+        if (stringChar === "`") {
+          if (ch === "$" && i + 1 < line.length && line[i + 1] === "{") {
+            inTemplateInterpolation++;
+            cur += "${";
+            i += 2;
+            continue;
+          }
+          if (ch === "}" && inTemplateInterpolation > 0) {
+            inTemplateInterpolation--;
+            cur += ch;
+            i++;
+            continue;
+          }
+        }
+        if (ch === stringChar && inTemplateInterpolation === 0) {
+          inString = false;
+          stringChar = "";
+        }
+        cur += ch;
+        i++;
+        continue;
+      }
 
-        cur += line.slice(i, next);
+      if (ch === '"' || ch === "'" || ch === "`") {
+        inString = true;
+        stringChar = ch;
+        inTemplateInterpolation = 0;
+        cur += ch;
+        i++;
+        continue;
+      }
 
-        if (isLineComment) {
+      if (ch === "/" && i + 1 < line.length) {
+        const next = line[i + 1];
+        if (next === "/") {
           break;
-        } else if (isBlockComment) {
-          i = next + 2;
+        } else if (next === "*") {
+          i += 2;
           inBlock = true;
+          continue;
         }
       }
+
+      cur += ch;
+      i++;
     }
 
     out[lineIdx] = cur;
@@ -228,4 +255,5 @@ function main() {
   process.exit(0);
 }
 
-main();
+// Run only when executed as a script, so tests can import stripComments without the check exiting the process.
+if (process.argv[1] && resolve(process.argv[1]).toLowerCase() === SCRIPT_FILE.toLowerCase()) main();

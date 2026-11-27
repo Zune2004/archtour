@@ -388,6 +388,85 @@ rules:
 
 The second rule turns off every oasdiff WARN item (level 2) and leaves oasdiff ERR items at `soft`.
 
+### Running the linters in CI
+
+Run each linter in an earlier step without failing the job on findings, then pass the output to Archtour via `--import`. This keeps the single required check in Archtour while the linters do the deep analysis.
+
+GitHub runs `shell: bash` steps with `set -e`, so a linter's non-zero exit ends the step unless the command handles it.
+
+**Squawk** exits 1 on findings. Use `|| true`: a Squawk run that failed leaves an empty or non-JSON file, and Archtour exits 3 on it. The `git diff` needs the base branch fetched (`actions/checkout` with `fetch-depth: 0`):
+```yaml
+- name: Run Squawk on changed migrations
+  run: |
+    # Only lint migrations the PR actually changes
+    CHANGED_MIGRATIONS=$(git diff --name-only origin/main...HEAD -- 'migrations/*.sql' || true)
+    if [ -n "$CHANGED_MIGRATIONS" ]; then
+      echo "$CHANGED_MIGRATIONS" | xargs squawk --reporter json > squawk.json || true
+    else
+      echo "[]" > squawk.json
+    fi
+  shell: bash
+- name: Archtour Guardrails
+  uses: Zune2004/archtour@v0
+  with:
+    import: |
+      squawk:squawk.json
+```
+
+**oasdiff** exits 0 unless `--fail-on` is used. Run without `--fail-on`:
+```yaml
+- name: Run oasdiff
+  run: oasdiff breaking base.yaml head.yaml --format json > oasdiff.json
+- name: Archtour Guardrails
+  uses: Zune2004/archtour@v0
+  with:
+    import: |
+      oasdiff:oasdiff.json
+```
+
+**buf** exits 100 on findings and 0 with no output when there are none. A crashed buf also leaves an empty file, which would read as "no findings". Accept only exit 0 or 100:
+```yaml
+- name: Run buf breaking
+  run: |
+    RC=0
+    buf breaking --against '.git#branch=main' --error-format json > buf.jsonl || RC=$?
+    if [ "$RC" -ne 0 ] && [ "$RC" -ne 100 ]; then
+      echo "buf failed with exit code $RC"
+      exit 1
+    fi
+  shell: bash
+- name: Archtour Guardrails
+  uses: Zune2004/archtour@v0
+  with:
+    import: |
+      buf:buf.jsonl
+```
+
+### Exception targets for imported ids
+
+Exception targets match the finding's entity ID or the part after the first colon:
+- Squawk and buf: `file:<path>` or `<path>` (e.g. `file:migrations/0002.sql` or `migrations/0002.sql`)
+- oasdiff: `api.route:<METHOD> <path>` or `<METHOD> <path>` (e.g. `api.route:GET /users` or `GET /users`)
+
+The `rule` field in an exception may be an explicit id (`squawk/ban-drop-column`) or a tool wildcard (`buf/*`). A tool wildcard needs a specific target: `target: "*"` exits 3, because rules.yml can make imported ids `hard`, and hard findings are only excepted per target.
+
+### `where` matchers for imported findings
+
+Imported findings expose these `where` keys: `level` (after the default mapping: Squawk Warning=`soft`, Error=`hard`; oasdiff 3=`soft`, 2=`warn`, 1=`advisory`; buf=`soft`), `file` (normalised path), `line`, `ruleId`, `entity`, `tool` (`squawk`, `oasdiff`, `buf`), and `message`.
+
+### `enforce_from` for imported ids
+
+`enforce_from` works identically to built-in rules. A rule with `level: hard` and `enforce_from: 2027-06-01` reports as `warn` with `(becomes hard on 2027-06-01)` before that date, and `hard` on or after.
+
+### Built-in rules overlap
+
+Archtour's built-in SQL rules and Squawk rules can both fire on the same change (e.g. a dropped column produces `sql-no-drop-column` and `squawk/ban-drop-column`). To avoid duplicate findings, turn one off in your rules.yml:
+```yaml
+rules:
+  - id: squawk/ban-drop-column
+    level: off
+```
+
 ### Fail closed
 
 A missing file, invalid JSON, the wrong top-level shape, or an item that does not match the documented format exits `3` with a one-line `archtour: --import <tool>:<path>: ...` error naming the file and the tool. An empty Squawk or oasdiff file is not valid (both write `[]` when there are no findings); an empty buf file is valid and means no findings. Archtour never runs the linters: run them in an earlier CI step and pass their output files.
@@ -677,6 +756,7 @@ Archtour Guardrails integrates directly into GitHub Actions via `uses: Zune2004/
 | `github-token` | Token used for GitHub API checks (comments, collaborators, teams). Note: `@org/team` owners require a GitHub App or fine-grained PAT with `Members: read`. | `${{ github.token }}` |
 | `comment` | Whether to post or update a PR comment | `true` |
 | `needs-human-label` | Label to add when the PR needs human review (optional) | `""` |
+| `import` | Newline-separated "tool:path" pairs for importing Squawk, oasdiff or buf output (e.g. `squawk:squawk.json`). Run those linters in an earlier step, before Archtour. | `""` |
 
 ### Action Outputs
 
