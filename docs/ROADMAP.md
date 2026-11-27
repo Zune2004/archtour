@@ -27,6 +27,9 @@ Archtour is **one required check that blocks breaking database and API contract 
 - **0.3.3 (2026-11-24):** needs-human gate for agent-written PRs (`needsHuman` in `--json`, a report line, Action
   outputs `needs-human`/`needs-human-reasons`/`verdict`, optional `needs-human-label`; fails closed when the check does
   not finish) and agent output mode (`--brief`, `--only`, `--limit`/`--offset`).
+- **0.4.0 (2026-11-27):** adapter mode (owner decision Q23): `--import` and the Action input `import` read the JSON
+  output of Squawk, oasdiff and `buf breaking` as findings with the same levels, owners, overrides, expiring
+  exceptions, debt ratchet and needs-human as built-in rules; `--` ends the options.
 
 ### What is explicitly NOT planned
 - **Module and import-boundary rules:** No language-level layer or import graph linting (TypeScript, JavaScript, Python, Go, Java, C#). Use existing specialized tools instead:
@@ -37,11 +40,9 @@ Archtour is **one required check that blocks breaking database and API contract 
 - **More infrastructure rules:** No competition with broad IaC scanners (Checkov, Trivy, kube-linter, Conftest/OPA). Archtour stays focused on contract safety and high-severity destructive changes.
 
 ### Next
-- **0.4.0, adapter mode (owner decision Q23):** read the JSON output of specialised linters (Squawk for deep Postgres
-  migration linting, oasdiff for OpenAPI, then `buf breaking` for Protobuf) as findings in Archtour's gate, so they get
-  the same owners, overrides, expiring exceptions, debt ratchet and audit trail.
-- **After 0.4.0:** folder import-boundary rules by reading dependency-cruiser output rather than a new parser (owner
-  decision Q34); an override/audit log export; publishing the measured precision; a clickable demo repository.
+- **Folder import-boundary rules** by reading dependency-cruiser output through the same adapter mode rather than a new
+  parser (owner decision Q34).
+- **Then:** an override/audit log export; publishing the measured precision; a clickable demo repository.
 
 ---
 
