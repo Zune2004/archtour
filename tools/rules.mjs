@@ -78,8 +78,8 @@ export function validateRule(rule, isNewRule = true) {
   }
 
   const id = rule.id.trim();
-  const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/");
-  const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*");
+  const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/") || id.startsWith("depcruise/");
+  const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*" || id === "depcruise/*");
 
   if (typeof rule.level !== "string" || !LEVELS.includes(rule.level)) {
     throw new Error(`Rule "${id}" has invalid field "level": "${rule.level}". Must be one of: ${LEVELS.join(", ")}`);
@@ -252,8 +252,8 @@ function mergeRuleIntoMap(rulesMap, incomingRule, sourceName, warnings) {
   } else {
     // New rule
     const id = incomingRule.id.trim();
-    const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/");
-    const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*");
+    const isImportedRule = id.startsWith("squawk/") || id.startsWith("oasdiff/") || id.startsWith("buf/") || id.startsWith("depcruise/");
+    const isToolWildcard = (id === "squawk/*" || id === "oasdiff/*" || id === "buf/*" || id === "depcruise/*");
     if (incomingRule.on == null && !isImportedRule && !isToolWildcard) {
       throw new Error(`Rule "${incomingRule.id}" is missing required field "on"`);
     }
@@ -609,7 +609,7 @@ export function loadExceptionsFile(filePath, opts = {}) {
     const targetStr = item.target.trim();
 
     // Allow tool wildcards: squawk/*, oasdiff/*, buf/*
-    const isToolWildcard = ruleStr === "squawk/*" || ruleStr === "oasdiff/*" || ruleStr === "buf/*";
+    const isToolWildcard = ruleStr === "squawk/*" || ruleStr === "oasdiff/*" || ruleStr === "buf/*" || ruleStr === "depcruise/*";
     const allRules = (Array.isArray(opts.rules) && opts.rules.length > 0) ? opts.rules : RECOMMENDED_RULES;
     const isRuleGlob = ruleStr.includes("*") || ruleStr.includes("?");
     const matchingRules = allRules.filter(r => r.id === ruleStr || (isRuleGlob && matchGlob(r.id, ruleStr)));
@@ -703,7 +703,8 @@ export function applyExceptions(findings = [], exceptions = []) {
           (Array.isArray(f.alsoMatched) && f.alsoMatched.includes(ex.rule)) ||
           (ex.rule === "squawk/*" && toolPrefix === "squawk") ||
           (ex.rule === "oasdiff/*" && toolPrefix === "oasdiff") ||
-          (ex.rule === "buf/*" && toolPrefix === "buf");
+          (ex.rule === "buf/*" && toolPrefix === "buf") ||
+          (ex.rule === "depcruise/*" && toolPrefix === "depcruise");
         if (!ruleMatch) continue;
 
         const entityId = f.event?.entityId || "";

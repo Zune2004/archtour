@@ -47,7 +47,7 @@ inputs:
     required: false
     default: 'auto'
   import:
-    description: 'Newline-separated "tool:path" pairs for importing Squawk, oasdiff or buf output (for example "squawk:squawk.json"). Run those linters in an earlier step, before Archtour.'
+    description: 'Newline-separated "tool:path" pairs for importing Squawk, oasdiff, buf or dependency-cruiser output (for example "squawk:squawk.json"). Run those linters in an earlier step, before Archtour.'
     required: false
     default: ''
   needs-human-label:

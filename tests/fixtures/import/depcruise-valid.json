@@ -1,0 +1,11 @@
+{
+  "modules": [],
+  "summary": {
+    "violations": [
+      { "type": "dependency", "from": "src/a.js", "to": "src/b.js",
+        "rule": { "severity": "error", "name": "no-dep" } }
+    ],
+    "error": 1, "warn": 0, "info": 0, "ignore": 0,
+    "totalCruised": 2, "totalDependenciesCruised": 1, "optionsUsed": {}
+  }
+}

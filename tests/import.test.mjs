@@ -1,4 +1,5 @@
 // Acceptance tests for adapter mode (Squawk, oasdiff, buf).
+// Orchestrator (2026-11-27, T-132): the supported-tool lists in four expectations now include dependency-cruiser.
 //
 // The fixtures are the exact shapes the tools write. JSON and JSON Lines cannot
 // carry comments without breaking the production parsers, so every fixture is
@@ -639,7 +640,7 @@ test("import errors: unknown tool", () => {
     assert.strictEqual(res.status, 3);
     assert.strictEqual(
       res.stderr.trimEnd(),
-      'archtour: --import unknowntool:somefile.json: unknown tool "unknowntool" (supported: squawk, oasdiff, buf)'
+      'archtour: --import unknowntool:somefile.json: unknown tool "unknowntool" (supported: squawk, oasdiff, buf, depcruise)'
     );
   } finally {
     cleanup();
@@ -716,14 +717,14 @@ test("help: check and baseline list --import", () => {
   assert.strictEqual(checkHelp.status, 0, checkHelp.stderr);
   assert.deepStrictEqual(
     checkHelp.stdout.split(/\r?\n/).filter((line) => line.startsWith("  --import")),
-    ["  --import <tool:path>        Import findings from Squawk, oasdiff or buf output (repeatable)"]
+    ["  --import <tool:path>        Import findings from Squawk, oasdiff, buf or dependency-cruiser output (repeatable)"]
   );
 
   const baselineHelp = run(["help", "baseline"]);
   assert.strictEqual(baselineHelp.status, 0, baselineHelp.stderr);
   assert.deepStrictEqual(
     baselineHelp.stdout.split(/\r?\n/).filter((line) => line.startsWith("  --import")),
-    ["  --import <tool:path>        Include imported findings in the baseline (repeatable)"]
+    ["  --import <tool:path>        Include imported findings in the baseline (repeatable; tools: squawk, oasdiff, buf, depcruise)"]
   );
 });
 
@@ -731,7 +732,7 @@ test("action.yml: import input is passed to the CLI", () => {
   const doc = yaml.parse(fs.readFileSync(path.resolve("action.yml"), "utf8"));
   assert.strictEqual(
     doc.inputs.import.description,
-    'Newline-separated "tool:path" pairs for importing Squawk, oasdiff or buf output (for example "squawk:squawk.json"). Run those linters in an earlier step, before Archtour.'
+    'Newline-separated "tool:path" pairs for importing Squawk, oasdiff, buf or dependency-cruiser output (for example "squawk:squawk.json"). Run those linters in an earlier step, before Archtour.'
   );
   const checkStep = doc.runs.steps.find((step) => step.id === "check");
   assert.ok(checkStep, "check step not found");

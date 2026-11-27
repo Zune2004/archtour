@@ -1,6 +1,6 @@
 # Import fixtures
 
-These files are the exact shapes Squawk, oasdiff and `buf breaking` write. JSON
+These files are the exact shapes Squawk, oasdiff, `buf breaking` and dependency-cruiser write. JSON
 and JSON Lines cannot carry comments without breaking the parsers, so each
 fixture is described here instead.
 
@@ -14,6 +14,12 @@ fixture is described here instead.
 | `buf-field-same-type.jsonl` | buf | `FIELD_SAME_TYPE` at `proto/user.proto:8`, then `FILE_NO_DELETE` with no `path`. |
 | `buf-file-no-delete.jsonl` | buf | One `FILE_NO_DELETE` annotation with no `path` (reported as file `unknown`). |
 | `buf-empty.jsonl` | buf | Empty file: buf writes nothing when there are no findings. |
+| `depcruise-mixed.json` | dependency-cruiser | Section 4 example: dependency (`no-ui-to-db`, error->soft), cycle (`no-circular`, warn->warn), module (`no-orphans`, info->advisory). |
+| `depcruise-reachability.json` | dependency-cruiser | Reachability violation with `via` array. |
+| `depcruise-instability.json` | dependency-cruiser | Instability violation with metrics. |
+| `depcruise-ignore.json` | dependency-cruiser | Violation with severity `ignore` (skipped). |
+| `depcruise-valid.json` | dependency-cruiser | Valid dependency violation for error testing. |
+| `depcruise-missing-type.json` | dependency-cruiser | Violation missing `type` field (defaults to dependency). |
 
 The shapes follow the adapter formats documentation: Squawk and oasdiff write a JSON
-array, buf writes one JSON object per line.
+array, buf writes one JSON object per line, dependency-cruiser writes a JSON object with `summary.violations` array.

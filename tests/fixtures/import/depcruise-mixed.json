@@ -1,0 +1,15 @@
+{
+  "modules": [],
+  "summary": {
+    "violations": [
+      { "type": "dependency", "from": "src/ui/button.js", "to": "src/db/client.js",
+        "dependencyTypes": ["local", "import"], "rule": { "severity": "error", "name": "no-ui-to-db" } },
+      { "type": "cycle", "from": "src/a.js", "to": "src/b.js",
+        "cycle": [ { "name": "src/b.js", "dependencyTypes": ["local"] }, { "name": "src/a.js", "dependencyTypes": ["local"] } ],
+        "rule": { "severity": "warn", "name": "no-circular" } },
+      { "type": "module", "from": "src/orphan.js", "to": "src/orphan.js", "rule": { "severity": "info", "name": "no-orphans" } }
+    ],
+    "error": 1, "warn": 1, "info": 1, "ignore": 0,
+    "totalCruised": 5, "totalDependenciesCruised": 4, "optionsUsed": {}
+  }
+}

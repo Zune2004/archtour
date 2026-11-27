@@ -1,0 +1,11 @@
+{
+  "modules": [],
+  "summary": {
+    "violations": [
+      { "type": "dependency", "from": "src/known.js", "to": "src/db/client.js",
+        "dependencyTypes": ["local", "import"], "rule": { "severity": "ignore", "name": "no-ui-to-db" } }
+    ],
+    "error": 0, "warn": 0, "info": 0, "ignore": 1,
+    "totalCruised": 2, "totalDependenciesCruised": 1, "optionsUsed": {}
+  }
+}

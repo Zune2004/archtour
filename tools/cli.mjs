@@ -123,9 +123,9 @@ function applyImportedRuleConfig(findings, rules, now) {
   const explicitRules = new Map();
   const wildcardRules = new Map();
   for (const rule of rules) {
-    if (rule.id === "squawk/*" || rule.id === "oasdiff/*" || rule.id === "buf/*") {
+    if (rule.id === "squawk/*" || rule.id === "oasdiff/*" || rule.id === "buf/*" || rule.id === "depcruise/*") {
       wildcardRules.set(rule.id.split("/")[0], rule);
-    } else if (rule.id.startsWith("squawk/") || rule.id.startsWith("oasdiff/") || rule.id.startsWith("buf/")) {
+    } else if (rule.id.startsWith("squawk/") || rule.id.startsWith("oasdiff/") || rule.id.startsWith("buf/") || rule.id.startsWith("depcruise/")) {
       explicitRules.set(rule.id, rule);
     }
   }
@@ -1297,7 +1297,7 @@ function printCheckHelp() {
   console.log("  --rules <file>              Custom rules file");
   console.log("  --include-untracked         Include untracked files with --changed-from");
   console.log("  --cache-dir <dir>           Directory to cache extracted facts");
-  console.log("  --import <tool:path>        Import findings from Squawk, oasdiff or buf output (repeatable)");
+  console.log("  --import <tool:path>        Import findings from Squawk, oasdiff, buf or dependency-cruiser output (repeatable)");
   console.log("  --override <rule>           Override a soft finding (repeatable)");
   console.log("  --override-by <user>        Override author");
   console.log("  --override-reason <text>    Override reason");
@@ -1322,7 +1322,7 @@ function printBaselineHelp() {
   console.log("  --max-files <n>             Maximum candidate files to examine (default: 20000)");
   console.log("  --migration-dir <path>      Extra folder whose .sql files are migrations (repeatable)");
   console.log("  --max-file-size <MB>        Skip files larger than this (default: 5; Terraform plan JSON: 50)");
-  console.log("  --import <tool:path>        Include imported findings in the baseline (repeatable)");
+  console.log("  --import <tool:path>        Include imported findings in the baseline (repeatable; tools: squawk, oasdiff, buf, depcruise)");
 }
 
 function printFactsHelp() {

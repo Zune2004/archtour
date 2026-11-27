@@ -357,7 +357,8 @@ Any changes to policy files under `.archtour/` in a PR are evaluated:
 archtour check --changed-from origin/main . \
   --import squawk:squawk.json \
   --import oasdiff:oasdiff.json \
-  --import buf:buf.jsonl
+  --import buf:buf.jsonl \
+  --import depcruise:depcruise.json
 ```
 
 | Tool | Accepted format | Level |
@@ -365,8 +366,9 @@ archtour check --changed-from origin/main . \
 | Squawk | JSON array (`squawk --reporter json`) | `Warning` -> `soft`, `Error` -> `hard` |
 | oasdiff | JSON array (`oasdiff breaking --format json`) | level 3 -> `soft`, 2 -> `warn`, 1 -> `advisory` |
 | buf | JSON Lines (`buf breaking --error-format json`) | every annotation -> `soft` |
+| dependency-cruiser | JSON (`depcruise --output-type json`) | `error` -> `soft`, `warn` -> `warn`, `info` -> `advisory`, `ignore` skipped |
 
-Imported rule ids are `<tool>/<id>` (`squawk/ban-drop-column`, `oasdiff/api-path-removed-without-deprecation`, `buf/FIELD_SAME_TYPE`). They support the same owners, exceptions, overrides, needs-human, baseline ratchet and Markdown report as built-in rules. The baseline ratchet also counts imported ids that `rules.yml` does not declare.
+Imported rule ids are `<tool>/<id>` (`squawk/ban-drop-column`, `oasdiff/api-path-removed-without-deprecation`, `buf/FIELD_SAME_TYPE`, `depcruise/no-ui-to-db`). They support the same owners, exceptions, overrides, needs-human, baseline ratchet and Markdown report as built-in rules. The baseline ratchet also counts imported ids that `rules.yml` does not declare.
 
 ### Setting levels and owners for imported ids
 
@@ -442,17 +444,42 @@ GitHub runs `shell: bash` steps with `set -e`, so a linter's non-zero exit ends 
       buf:buf.jsonl
 ```
 
+**dependency-cruiser** exits 0 even with violations (the JSON reporter never fails). `--affected` limits the run to modules that reach the files changed since the given ref; `--ignore-known` softens known violations to severity `ignore`, which Archtour skips. The `git diff` needs the base branch fetched (`actions/checkout` with `fetch-depth: 0`):
+```yaml
+- name: Run dependency-cruiser
+  run: |
+    npx depcruise src --affected origin/main --output-type json > depcruise.json
+  shell: bash
+- name: Archtour Guardrails
+  uses: Zune2004/archtour@v0
+  with:
+    import: |
+      depcruise:depcruise.json
+```
+
+A minimal `.dependency-cruiser.js` forbidding `src/ui` from importing `src/db`:
+```js
+module.exports = {
+  forbidden: [
+    { name: "no-ui-to-db", severity: "error", from: { path: "^src/ui" }, to: { path: "^src/db" } }
+  ]
+};
+```
+
+Without `--affected` every existing violation in the repo is imported, and each one is a finding: the baseline ratchet only stops a rule's count from growing, it does not hide findings. For violations that already exist, use dependency-cruiser's own known-violations file: write it once with `npx depcruise src --output-type baseline > .dependency-cruiser-known-violations.json`, commit it, and run with `--ignore-known`. Known violations then have severity `ignore` and Archtour skips them.
+
 ### Exception targets for imported ids
 
 Exception targets match the finding's entity ID or the part after the first colon:
 - Squawk and buf: `file:<path>` or `<path>` (e.g. `file:migrations/0002.sql` or `migrations/0002.sql`)
 - oasdiff: `api.route:<METHOD> <path>` or `<METHOD> <path>` (e.g. `api.route:GET /users` or `GET /users`)
+- dependency-cruiser: `dep:<from> -> <to>` or `cycle:<from>` or `file:<path>` (e.g. `dep:src/ui/button.js -> src/db/client.js`, `cycle:src/a.js`, `file:src/orphan.js`)
 
-The `rule` field in an exception may be an explicit id (`squawk/ban-drop-column`) or a tool wildcard (`buf/*`). A tool wildcard needs a specific target: `target: "*"` exits 3, because rules.yml can make imported ids `hard`, and hard findings are only excepted per target.
+The `rule` field in an exception may be an explicit id (`squawk/ban-drop-column`) or a tool wildcard (`buf/*`, `depcruise/*`). A tool wildcard needs a specific target: `target: "*"` exits 3, because rules.yml can make imported ids `hard`, and hard findings are only excepted per target.
 
 ### `where` matchers for imported findings
 
-Imported findings expose these `where` keys: `level` (after the default mapping: Squawk Warning=`soft`, Error=`hard`; oasdiff 3=`soft`, 2=`warn`, 1=`advisory`; buf=`soft`), `file` (normalised path), `line`, `ruleId`, `entity`, `tool` (`squawk`, `oasdiff`, `buf`), and `message`.
+Imported findings expose these `where` keys: `level` (after the default mapping: Squawk Warning=`soft`, Error=`hard`; oasdiff 3=`soft`, 2=`warn`, 1=`advisory`; buf=`soft`; dependency-cruiser `error`=`soft`, `warn`=`warn`, `info`=`advisory`), `file` (normalised path), `line`, `ruleId`, `entity`, `tool` (`squawk`, `oasdiff`, `buf`, `depcruise`), and `message`.
 
 ### `enforce_from` for imported ids
 

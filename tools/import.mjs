@@ -1,11 +1,11 @@
-// Import adapter for Squawk, oasdiff and buf output files.
+// Import adapter for Squawk, oasdiff, buf and dependency-cruiser output files.
 // Reads the machine output a team's CI already produced and turns each item
 // into an Archtour finding. It never runs the tools and never writes anything.
 
 import fs from "node:fs";
 import path from "node:path";
 
-export const SUPPORTED_TOOLS = ["squawk", "oasdiff", "buf"];
+export const SUPPORTED_TOOLS = ["squawk", "oasdiff", "buf", "depcruise"];
 
 function importError(message) {
   const err = new Error(message);
@@ -105,6 +105,15 @@ function isBufAnnotation(item) {
     Number.isInteger(item.start_line) && item.start_line >= 1;
 }
 
+function isDepcruiseViolation(item) {
+  return isPlainObject(item) &&
+    typeof item.from === "string" && item.from.trim() !== "" &&
+    typeof item.to === "string" && item.to.trim() !== "" &&
+    isPlainObject(item.rule) &&
+    typeof item.rule.name === "string" && item.rule.name.trim() !== "" &&
+    (item.rule.severity === "error" || item.rule.severity === "warn" || item.rule.severity === "info" || item.rule.severity === "ignore");
+}
+
 function importedFinding(ruleId, level, message, file, line, entity, eventType, kind) {
   return {
     ruleId,
@@ -198,6 +207,84 @@ function bufToFindings(items, displayPath, checkedFolder) {
   });
 }
 
+// Orchestrator (2026-11-27): cycle/via are lists of { name }; anything else is not dependency-cruiser output (exit 3).
+function chainNames(chain, field, index, displayPath, checkedFolder) {
+  if (chain === undefined) return [];
+  if (!Array.isArray(chain) || !chain.every((c) => isPlainObject(c) && typeof c.name === "string" && c.name !== "")) {
+    throw importError(`--import depcruise:${displayPath}: violation ${index + 1} is not a dependency-cruiser violation`);
+  }
+  return chain.map((c) => normalizeImportPath(c.name, checkedFolder));
+}
+
+function depcruiseToFindings(items, displayPath, checkedFolder) {
+  return items.map((item, index) => {
+    if (!isDepcruiseViolation(item)) {
+      throw importError(`--import depcruise:${displayPath}: violation ${index + 1} is not a dependency-cruiser violation`);
+    }
+    // Skip violations with severity "ignore" (known violations from --ignore-known)
+    if (item.rule.severity === "ignore") {
+      return null;
+    }
+    const violationType = item.type || "dependency";
+    const from = normalizeImportPath(item.from, checkedFolder);
+    const to = normalizeImportPath(item.to, checkedFolder);
+    let entity;
+    let message;
+    let level;
+
+    // Map severity: error -> soft, warn -> warn, info -> advisory
+    if (item.rule.severity === "error") level = "soft";
+    else if (item.rule.severity === "warn") level = "warn";
+    else level = "advisory"; // info
+
+    if (violationType === "cycle") {
+      // Cycle: from is the first, cycle array has the cycle path
+      const cyclePath = chainNames(item.cycle, "cycle", index, displayPath, checkedFolder);
+      const cycleNames = [from, ...cyclePath].join(" -> ");
+      entity = `cycle:${from}`;
+      message = `circular dependency: ${cycleNames}`;
+    } else if (violationType === "reachability") {
+      // Reachability: from reaches to via via[]
+      const viaPath = chainNames(item.via, "via", index, displayPath, checkedFolder);
+      if (viaPath.length > 0) {
+        message = `${from} reaches ${to} via ${viaPath.join(" -> ")}`;
+      } else {
+        message = `${from} reaches ${to}`;
+      }
+      entity = `dep:${from} -> ${to}`;
+    } else if (violationType === "instability") {
+      // Instability: from (instability X) depends on to (instability Y)
+      const fromMetric = item.metrics && item.metrics.from && typeof item.metrics.from.instability === "number" ? item.metrics.from.instability : null;
+      const toMetric = item.metrics && item.metrics.to && typeof item.metrics.to.instability === "number" ? item.metrics.to.instability : null;
+      if (fromMetric !== null && toMetric !== null) {
+        message = `${from} (instability ${fromMetric}) depends on ${to} (instability ${toMetric})`;
+      } else {
+        message = `${from} depends on less stable ${to}`;
+      }
+      entity = `dep:${from} -> ${to}`;
+    } else if (violationType === "module") {
+      // Module rule: from == to, entity is file:path
+      entity = `file:${from}`;
+      message = `${from}: module rule ${item.rule.name}`;
+    } else {
+      // Default: dependency violation
+      entity = `dep:${from} -> ${to}`;
+      message = `${from} imports ${to}`;
+    }
+
+    return importedFinding(
+      `depcruise/${item.rule.name}`,
+      level,
+      message,
+      from,
+      1, // dependency-cruiser doesn't provide line numbers
+      entity,
+      "imported.depcruise",
+      violationType === "module" ? "file" : "dependency"
+    );
+  }).filter(Boolean); // Remove null entries (ignored violations)
+}
+
 function readBufAnnotations(filePath, displayPath) {
   const content = readText(filePath, "buf", displayPath);
   if (!content.trim()) return []; // buf writes nothing when there are no findings
@@ -234,6 +321,10 @@ export function loadImportedFindings(importArgs, checkedFolder) {
       const items = readJsonArray(absPath, tool, filePath, "an oasdiff JSON array");
       const findings = oasdiffToFindings(items, filePath, checkedFolder);
       for (const f of findings) allFindings.push(f);
+    } else if (tool === "depcruise") {
+      const items = readDepcruiseViolations(absPath, filePath);
+      const findings = depcruiseToFindings(items, filePath, checkedFolder);
+      for (const f of findings) allFindings.push(f);
     } else {
       const items = readBufAnnotations(absPath, filePath);
       const findings = bufToFindings(items, filePath, checkedFolder);
@@ -241,4 +332,21 @@ export function loadImportedFindings(importArgs, checkedFolder) {
     }
   }
   return allFindings;
+}
+
+function readDepcruiseViolations(filePath, displayPath) {
+  const content = readText(filePath, "depcruise", displayPath);
+  if (!content.trim()) {
+    throw importError(`--import depcruise:${displayPath}: not valid JSON`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw importError(`--import depcruise:${displayPath}: not valid JSON`);
+  }
+  if (!isPlainObject(parsed) || !Array.isArray(parsed.summary?.violations)) {
+    throw importError(`--import depcruise:${displayPath}: not a dependency-cruiser JSON result (expected summary.violations; run depcruise with --output-type json)`);
+  }
+  return parsed.summary.violations;
 }

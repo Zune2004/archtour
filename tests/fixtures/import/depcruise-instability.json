@@ -1,0 +1,12 @@
+{
+  "modules": [],
+  "summary": {
+    "violations": [
+      { "type": "instability", "from": "src/a.js", "to": "src/b.js",
+        "metrics": { "from": { "instability": 0.8 }, "to": { "instability": 0.2 } },
+        "rule": { "severity": "warn", "name": "no-unstable" } }
+    ],
+    "error": 0, "warn": 1, "info": 0, "ignore": 0,
+    "totalCruised": 2, "totalDependenciesCruised": 1, "optionsUsed": {}
+  }
+}
