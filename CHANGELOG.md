@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-27
+
+### Added
+- **Import other linters:** `check --import <tool>:<file>` (repeatable) and the Action input `import` (one
+  `tool:path` per line) turn the output of Squawk (`squawk --reporter json`), oasdiff
+  (`oasdiff breaking --format json`) and buf (`buf breaking --error-format json`) into normal findings such as
+  `squawk/ban-drop-column`. Squawk `Warning` is `soft` and `Error` is `hard`; oasdiff levels 3, 2 and 1 are `soft`,
+  `warn` and `advisory`; buf items are `soft`. Levels, owners, messages and `enforce_from` come from the base branch's
+  `rules.yml` (an imported id, or `<tool>/*` with `where`). Exceptions take an imported id or `<tool>/*` with a
+  specific target. Overrides, the baseline ratchet, needs-human and the report work as for built-in rules. File paths
+  in the linters' output (`./x`, `x\y`, absolute paths inside the checked folder) are made relative. Archtour never
+  runs the linters: docs/GUARDRAILS.md section 7 shows CI steps that run them first without letting a crashed linter
+  read as "no findings". A missing or malformed file, an unknown tool, `--import` without `tool:`, or `--import` on a
+  command other than `check` and `baseline` exits 3.
+- **`--` ends the options:** everything after it is a positional, so `check base -- -odd-folder-name` works.
+
+### Changed
+- `help check` and docs/CLI.md list `--ignore <glob>` and `--include-tests`, which `check` already used.
+- docs/CLI.md says that a usage or config error (exit 3) prints its message on stderr and nothing on stdout, also
+  with `--json`.
 ## [0.3.3] - 2026-11-24
 
 ### Added
