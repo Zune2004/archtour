@@ -495,27 +495,32 @@ test("review13: import error in --changed-from mode calls policyCleanup (no leak
     spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repo, encoding: "utf8" });
     spawnSync("git", ["config", "user.name", "Test"], { cwd: repo, encoding: "utf8" });
     fs.writeFileSync(path.join(repo, "README.md"), "base\n");
+    // Orchestrator (2026-11-27): the base needs a policy, or no base-policy temp folder is created at all.
+    fs.mkdirSync(path.join(repo, ".archtour"));
+    fs.writeFileSync(path.join(repo, ".archtour", "rules.yml"), "version: 1\nextends: [archtour:recommended]\n");
     spawnSync("git", ["add", "-A"], { cwd: repo, encoding: "utf8" });
     spawnSync("git", ["commit", "-m", "base"], { cwd: repo, encoding: "utf8" });
     fs.writeFileSync(path.join(repo, "README.md"), "head\n");
     spawnSync("git", ["add", "-A"], { cwd: repo, encoding: "utf8" });
     spawnSync("git", ["commit", "-m", "head"], { cwd: repo, encoding: "utf8" });
 
-    const tempDir = process.env.TEMP || process.env.TMP || "C:\\Windows\\Temp";
-    const before = fs.readdirSync(tempDir).filter(f => f.startsWith("archtour-base-policy-")).length;
-
-    const res = run([
-      "check",
-      "--changed-from", "HEAD~1",
-      repo,
-      "--import", "squawk:/nonexistent.json",
-      "--json"
-    ]);
-    assert.strictEqual(res.status, 3);
-    assert.match(res.stderr, /file not found/);
-
-    const after = fs.readdirSync(tempDir).filter(f => f.startsWith("archtour-base-policy-")).length;
-    assert.strictEqual(after, before, `Temp folder count grew from ${before} to ${after}`);
+    // Orchestrator: the CLI gets its own empty temp folder (TMPDIR on Linux/macOS, TEMP/TMP on Windows), so tests
+    // running in parallel cannot change what is counted.
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "archtour-review13-tmp-"));
+    try {
+      const res = run([
+        "check",
+        "--changed-from", "HEAD~1",
+        repo,
+        "--import", "squawk:/nonexistent.json",
+        "--json"
+      ], { env: { ...process.env, TMPDIR: tempDir, TEMP: tempDir, TMP: tempDir } });
+      assert.strictEqual(res.status, 3);
+      assert.match(res.stderr, /file not found/);
+      assert.deepStrictEqual(fs.readdirSync(tempDir).filter(f => f.startsWith("archtour-base-policy-")), []);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
