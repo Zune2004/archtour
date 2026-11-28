@@ -135,7 +135,7 @@ function getFactsForFiles(files, blobCache) {
   return { entities, relations, sources, errors, parseErrors };
 }
 
-async function runGit(repoDir, args) {
+export async function runGit(repoDir, args) {
   try {
     const { stdout } = await execFileAsync("git", args, {
       cwd: repoDir,

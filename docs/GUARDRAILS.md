@@ -895,7 +895,121 @@ archtour audit-history --json > audit.json
 
 ---
 
-## 12. CLI Reference (`archtour check --help`)
+## 12. Policy Change Log (`archtour audit-log`)
+
+A team lead can run one offline command and get every change to the Archtour policy of a repo (exceptions added/removed/changed, rules removed or weakened, baseline debt raised) with commit, date, author and reason, plus the list of exceptions in force today and whether they have expired.
+
+```bash
+# Audit policy changes on the current branch
+archtour audit-log
+
+# Specify repo, branch, date range, or commit limit
+archtour audit-log ./my-repo --branch main --since 2026-01-01 --max-commits 500
+
+# Output as JSON or CSV
+archtour audit-log --json > policy-changes.json
+archtour audit-log --csv > policy-changes.csv
+
+# Save to a file
+archtour audit-log --out report.txt
+archtour audit-log --json --out policy-changes.json
+```
+
+### Options
+- `<repoDir>`: Directory of the git repository (defaults to `.`)
+- `--branch <ref>`: Branch or ref to walk (default: `HEAD`)
+- `--since <date>`: Only commits on or after this committer date (ISO 8601 or YYYY-MM-DD)
+- `--until <date>`: Only commits on or before this committer date (ISO 8601 or YYYY-MM-DD)
+- `--max-commits <n>`: Maximum policy-changing commits to read, newest first, after `--since`/`--until` (default: 1000)
+- `--as-of <YYYY-MM-DD>`: Date used for exception expiry status (default: today UTC)
+- `--json`: Output machine-readable JSON
+- `--csv`: Output events as CSV (RFC 4180)
+- `--out <file>`: Write the chosen output to a file instead of stdout
+
+### What is Recorded
+
+The command walks the first-parent history of the branch (default `HEAD`) and compares each commit with its first parent. Only commits that touch one of the policy files produce events:
+
+| File | Events produced |
+|------|-----------------|
+| `.archtour/exceptions.yml` / `.archtour/exceptions.yaml` | `exception-added`, `exception-removed`, `exception-changed` |
+| `.archtour/rules.yml` / `.archtour/rules.yaml` | `rule-added`, `rule-removed`, `rule-changed`, `extends-changed` |
+| `.archtour/baseline.json` | `baseline-raised`, `baseline-lowered` |
+
+A `.yml` to `.yaml` rename is treated as a single file (not an add plus a remove).
+
+### Event Fields
+
+Every event has:
+- `date` — committer date, ISO 8601 UTC with `Z`
+- `commit` — full SHA
+- `author` — author name
+- `email` — author email
+- `subject` — commit subject
+- `kind` — event kind (see table below)
+- `file` — repo-relative path with `/` separators
+- `key` — rule/target or rule ID (empty for parse-error)
+- `weakened` — `true` / `false` / `null` (see below)
+- `before` / `after` / `message` — per-kind payloads
+
+### What `weakened` Means
+
+| Kind | `weakened: true` when | `weakened: false` when | `weakened: null` when |
+|------|----------------------|------------------------|----------------------|
+| `exception-added` | always | — | — |
+| `exception-removed` | — | always | — |
+| `exception-changed` | `expires` moved later or removed | `reason` or `owner` changed, `expires` moved earlier | — |
+| `rule-added` | — | always | — |
+| `rule-removed` | always | — | — |
+| `rule-changed` | level got weaker, `enforce_from` added or moved later, `adjustable` false→true | level stronger/neutral, `enforce_from` removed or moved earlier, `adjustable` true→false | only `where` or `owners` changed |
+| `extends-changed` | an `extends` entry was removed | an `extends` entry was added | — |
+| `baseline-raised` | always | — | — |
+| `baseline-lowered` | — | always | — |
+| `parse-error` | — | — | always |
+
+### Current Exceptions
+
+At the end of the report, a table shows every exception in force at the branch tip with:
+- `rule`, `target`, `reason`, `owner`, `expires`
+- `added` — `{commit, date, author}` of the newest event that added or last changed it (or `null` if older than the walked range)
+- `status` — `expired` (expires < `--as-of`), `expiring` (within 30 days inclusive), `active`, or `no-expiry`
+
+### PR Overrides Are Not Included
+
+PR overrides from `/archtour override` comments are **not** in git history and therefore do not appear in this log. They are a later feature. The JSON output of the check command (`archtour check ... --json`) includes `overrides` for the current PR.
+
+### CI Example — Monthly Policy Change Artifact
+
+```yaml
+# .github/workflows/policy-audit.yml
+name: Monthly Policy Audit
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # First day of every month
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run policy audit log
+        run: npx --yes archtour audit-log --csv --out policy-changes.csv
+      - name: Upload policy change log
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-changes-${{ github.run_id }}
+          path: policy-changes.csv
+          retention-days: 90
+```
+
+This saves the CSV as a build artifact once a month, creating an auditable trail of every policy weakening or exception grant.
+
+---
+
+## 13. CLI Reference (`archtour check --help`)
 
 View all available options and flags for the guardrails check command:
 

@@ -33,6 +33,7 @@ import {
   matchGlob
 } from "./rules.mjs";
 import { auditHistory } from "./history.mjs";
+import { auditLog, formatAuditLogText, formatAuditLogCsv } from "./audit-log.mjs";
 import { setSettings } from "./settings.mjs";
 import { helmAvailable, loadHelmConfig } from "./helm-render.mjs";
 import { loadImportedFindings, SUPPORTED_TOOLS, LINTER_CONFIG_FILES } from "./import.mjs";
@@ -323,6 +324,7 @@ function parseArgs(argv, command) {
     if (a === "-o" || a === "--out") out.out = argv[++i];
     else if (a === "--strict") out.strict = true;
     else if (a === "--json") out.json = true;
+    else if (a === "--csv") out.csv = true;
     else if (a === "--no-split") out.noSplit = true;
     else if (a === "--max-nodes") out.maxNodes = Number(argv[++i]);
     else if (a.startsWith("--max-nodes=")) out.maxNodes = Number(a.slice("--max-nodes=".length));
@@ -426,6 +428,14 @@ function parseArgs(argv, command) {
       out.since = argv[++i];
     } else if (a.startsWith("--since=")) {
       out.since = a.slice("--since=".length);
+    } else if (a === "--until") {
+      out.until = argv[++i];
+    } else if (a.startsWith("--until=")) {
+      out.until = a.slice("--until=".length);
+    } else if (a === "--as-of") {
+      out.asOf = argv[++i];
+    } else if (a.startsWith("--as-of=")) {
+      out.asOf = a.slice("--as-of=".length);
     } else if (a === "--repo-url") {
       out.repoUrl = argv[++i];
     } else if (a.startsWith("--repo-url=")) {
@@ -1341,6 +1351,41 @@ async function handleAuditHistoryCommand(repoDirArg, opts = {}) {
   }
 }
 
+async function handleAuditLogCommand(repoDirArg, opts = {}) {
+  if (opts.json && opts.csv) {
+    die("--json and --csv cannot be combined", 3);
+  }
+
+  let result;
+  try {
+    result = await auditLog(repoDirArg || ".", opts);
+  } catch (err) {
+    die(err.message, err.exitCode || 3);
+  }
+
+  let content;
+  if (opts.csv) {
+    content = formatAuditLogCsv(result);
+  } else if (opts.json) {
+    content = JSON.stringify(result, null, 2);
+  } else {
+    content = formatAuditLogText(result);
+  }
+
+  if (opts.out) {
+    const outPath = path.resolve(opts.out);
+    try {
+      ensureDir(path.dirname(outPath));
+      fs.writeFileSync(outPath, content.endsWith("\n") ? content : `${content}\n`, "utf8");
+    } catch (err) {
+      die(`failed to write output to ${opts.out}: ${err.message}`, 3);
+    }
+    return;
+  }
+
+  console.log(content);
+}
+
 // ---------------------------------------------------------------- main
 
 function printUsage() {
@@ -1350,6 +1395,7 @@ function printUsage() {
   console.log("  check [<base> <head>]        Architecture guardrails for a change (the CI gate)");
   console.log("  baseline [<dir>]             Lock in current architecture debt counts");
   console.log("  audit-history [<repoDir>]    Audit violations across git commit history");
+  console.log("  audit-log [<repoDir>]        Audit policy changes (exceptions, rules, baseline) across git history");
   console.log("  facts [<dir>|<file>]         Show normalized architecture facts");
   console.log("  changes <baseDir> <headDir>  Show architecture change events between two directories");
   console.log("  scan [<dir>]                 List architecture sources and write a spec JSON");
@@ -1445,6 +1491,22 @@ function printAuditHistoryHelp() {
   console.log("  --json                      Output machine-readable JSON");
 }
 
+function printAuditLogHelp() {
+  console.log("usage: archtour audit-log [<repoDir>] [--branch <ref>] [--since <date>] [--until <date>] [--max-commits <n>] [--as-of <YYYY-MM-DD>] [--json | --csv] [--out <file>]");
+  console.log("");
+  console.log("Audit every change to the Archtour policy (.archtour/ exceptions, rules, baseline) from git history.");
+  console.log("");
+  console.log("Options:");
+  console.log("  --branch <ref>              Branch or ref to walk (default: HEAD)");
+  console.log("  --since <date>              Only commits on or after this committer date");
+  console.log("  --until <date>              Only commits on or before this committer date");
+  console.log("  --max-commits <n>           Maximum policy-changing commits to read (default: 1000)");
+  console.log("  --as-of <YYYY-MM-DD>        Date used for exception expiry (default: today UTC)");
+  console.log("  --json                      Output machine-readable JSON");
+  console.log("  --csv                       Output events as CSV (RFC 4180)");
+  console.log("  --out <file>                Write the chosen output to a file instead of stdout");
+}
+
 function printScanHelp() {
   console.log("usage: archtour scan [<dir>] [-o out.json] [options]");
   console.log("");
@@ -1473,7 +1535,7 @@ function isHelpRequest(cmd, rest, opts) {
   return rest[0] === "help";
 }
 
-const COMMANDS = new Set(["check", "baseline", "audit-history", "facts", "changes", "scan", "help", "version"]);
+const COMMANDS = new Set(["check", "baseline", "audit-history", "audit-log", "facts", "changes", "scan", "help", "version"]);
 
 // Only names the command in an unknown-option error; the command itself is always the first argument.
 function detectCommand(argv) {
@@ -1502,6 +1564,7 @@ async function main() {
     if (helpTarget === "facts") { printFactsHelp(); return; }
     if (helpTarget === "changes") { printChangesHelp(); return; }
     if (helpTarget === "audit-history") { printAuditHistoryHelp(); return; }
+    if (helpTarget === "audit-log") { printAuditLogHelp(); return; }
     if (helpTarget === "scan") { printScanHelp(); return; }
     printUsage();
     return;
@@ -1546,7 +1609,8 @@ async function main() {
   else if (cmd === "facts") await handleFactsCommand(input, opts);
   else if (cmd === "changes") await handleChangesCommand(opts._[0], opts._[1], opts);
   else if (cmd === "audit-history") await handleAuditHistoryCommand(input, opts);
-  else die("usage: archtour <check|baseline|audit-history|facts|changes|scan> [options]  (run 'archtour help')");
+  else if (cmd === "audit-log") await handleAuditLogCommand(input, opts);
+  else die("usage: archtour <check|baseline|audit-history|audit-log|facts|changes|scan> [options]  (run 'archtour help')");
 }
 
 function handleError(err) {

@@ -27,7 +27,8 @@ test("tools/cli.mjs --help runs successfully from a fresh temp directory", () =>
 test("archtour help lists the guardrails commands with check first", () => {
   const r = spawnSync(process.execPath, [CLI, "help"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const order = ["check", "baseline", "audit-history", "facts", "changes", "scan"];
+  // Orchestrator (T-134): audit-log is a new command, listed after audit-history.
+  const order = ["check", "baseline", "audit-history", "audit-log", "facts", "changes", "scan"];
   const listed = r.stdout
     .split("\n")
     .filter((line) => /^  \S/.test(line))
