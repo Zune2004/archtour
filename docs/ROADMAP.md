@@ -30,6 +30,9 @@ Archtour is **one required check that blocks breaking database and API contract 
 - **0.4.0 (2026-11-27):** adapter mode (owner decision Q23): `--import` and the Action input `import` read the JSON
   output of Squawk, oasdiff and `buf breaking` as findings with the same levels, owners, overrides, expiring
   exceptions, debt ratchet and needs-human as built-in rules; `--` ends the options.
+- **0.5.0 (2026-11-27):** folder import-boundary rules through dependency-cruiser output (`--import depcruise:<file>`,
+  owner decision Q34); a PR that changes an imported tool's config or known-violations file gets a soft
+  `linter-config-changed` finding and needs a human; long `--json` output is no longer cut off on Linux and macOS.
 
 ### What is explicitly NOT planned
 - **Module and import-boundary rules:** No language-level layer or import graph linting (TypeScript, JavaScript, Python, Go, Java, C#). Use existing specialized tools instead:
@@ -40,9 +43,9 @@ Archtour is **one required check that blocks breaking database and API contract 
 - **More infrastructure rules:** No competition with broad IaC scanners (Checkov, Trivy, kube-linter, Conftest/OPA). Archtour stays focused on contract safety and high-severity destructive changes.
 
 ### Next
-- **Folder import-boundary rules** by reading dependency-cruiser output through the same adapter mode rather than a new
-  parser (owner decision Q34).
-- **Then:** an override/audit log export; publishing the measured precision; a clickable demo repository.
+- **Override/audit log export** (owner choice 2026-11-28): who overrode or excepted which finding, why and when, as
+  JSON or CSV for sign-off reviews.
+- **Then:** publishing the measured precision; a clickable demo repository.
 
 ---
 
